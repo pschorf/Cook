@@ -31,7 +31,7 @@ public class M8s {
         Watch<V1Event> eventsWatch = Watch.createWatch(this.apiClient,
                 call,
                 new TypeToken<Watch.Response<V1Event>>() {}.getType());
-        executorService.execute(new NamespaceEventsWatcher(eventsWatch, notifier));
+        executorService.execute(new PodEventWatcher(eventsWatch, notifier));
     }
 
 }

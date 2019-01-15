@@ -8,12 +8,12 @@ import io.kubernetes.client.util.Watch;
  * Created by rodrigo on 1/15/19.
  */
 
-public class NamespaceEventsWatcher implements Runnable {
+public class PodEventWatcher implements Runnable {
 
     private Watch<V1Event> eventsWatch;
     private PodEventNotifier notifier;
 
-    public NamespaceEventsWatcher(Watch<V1Event> eventsWatch, PodEventNotifier notifier) {
+    public PodEventWatcher(Watch<V1Event> eventsWatch, PodEventNotifier notifier) {
         this.eventsWatch = eventsWatch;
         this.notifier = notifier;
     }
