@@ -3,6 +3,7 @@ package com.twosigma.m8s;
 import io.kubernetes.client.models.V1Event;
 import io.kubernetes.client.models.V1ObjectReference;
 import io.kubernetes.client.util.Watch;
+import org.joda.time.DateTime;
 
 /**
  * Created by rodrigo on 1/15/19.
@@ -26,10 +27,12 @@ public class PodEventWatcher implements Runnable {
                 if(involvedObject.getKind().toLowerCase().equals("pod")) {
                     String podName = involvedObject.getName();
                     String reason = event.getReason();
+                    DateTime firstTimestamp = event.getFirstTimestamp();
+                    DateTime lastTimestamp = event.getLastTimestamp();
                     if (reason.equals("Killing")) {
-                        this.notifier.handlePodKilled(podName);
+                        this.notifier.handlePodKilled(podName, firstTimestamp, lastTimestamp);
                     } else if (reason.equals("Started")) {
-                        this.notifier.handlePodStarted(podName);
+                        this.notifier.handlePodStarted(podName, firstTimestamp, lastTimestamp);
                     }
                 }
             }

@@ -17,6 +17,7 @@ public class ApiClientBuilder {
         ApiClient apiClient = Config.fromConfig(filename);
         // Disable timeout for watches
         apiClient.getHttpClient().setReadTimeout(0, TimeUnit.MILLISECONDS);
+        //apiClient.setDebugging(true);
         return apiClient;
     }
 

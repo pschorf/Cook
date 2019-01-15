@@ -2,15 +2,17 @@ package com.twosigma.m8s;
 
 import io.kubernetes.client.ApiClient;
 import io.kubernetes.client.ApiException;
+import org.joda.time.DateTime;
 
 import java.io.IOException;
+import java.util.UUID;
 
 /**
  * Created by rodrigo on 1/15/19.
  */
 public class Application {
 
-    public static void main(String[] args) throws IOException, ApiException {
+    public static void main(String[] args) throws IOException, ApiException, InterruptedException {
 
         // Create an API client to talk to a k8s cluster. Here we pass a config file,
         // we could easily use this to talk to more than 1 gke cluster
@@ -19,18 +21,22 @@ public class Application {
 
         // Start polling pod events, atm we only care about pods started and killed.
         m8.pollPodEvents(new PodEventNotifier() {
-            public void handlePodStarted(String podName) {
-                System.out.println("Pod " + podName + "has started");
+            public void handlePodStarted(String podName, DateTime firstTimestamp, DateTime lastTimestamp) {
+                System.out.println("Pod " + podName + " started at (first) " + firstTimestamp + " (last) " + lastTimestamp);
             }
 
-            public void handlePodFinished(String podName) {
+            public void handlePodFinished(String podName, DateTime firstTimestamp, DateTime lastTimestamp) {
 
             }
 
-            public void handlePodKilled(String podName) {
-                System.out.println("Pod " + podName + "has been killed");
+            public void handlePodKilled(String podName, DateTime firstTimestamp, DateTime lastTimestamp) {
+                System.out.println("Pod " + podName + " killed at (first) " + firstTimestamp + " (last) " + lastTimestamp);
             }
         });
+
+        Thread.currentThread().sleep(3000);
+        String uuid = UUID.randomUUID().toString();
+        m8.startPod(0.5, 128, "nginx:latest", uuid);
     }
 
 }
