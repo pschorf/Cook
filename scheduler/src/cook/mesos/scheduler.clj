@@ -54,6 +54,8 @@
                              TaskAssignmentResult TaskRequest TaskScheduler TaskScheduler$Builder
                              VMTaskFitnessCalculator VirtualMachineLease VirtualMachineLease$Range
                              VirtualMachineCurrentState]
+          [io.kubernetes.client ApiClient ApiClientBuilder]
+          [com.twosigma.m8s M8s PodEventNotifier]
           [com.netflix.fenzo.functions Action1 Func1]))
 
 (defn now
@@ -1441,11 +1443,10 @@
 (defn create-mesos-scheduler
   "Creates the mesos scheduler which processes status updates asynchronously but in order of receipt."
   [configured-framework-id gpu-enabled? conn heartbeat-ch pool->fenzo pool->offers-chan match-trigger-chan
-   handle-exit-code handle-progress-message sandbox-syncer-state]
+   handle-exit-code handle-progress-message sandbox-syncer-state api-client]
   (let [sync-agent-sandboxes-fn #(sandbox/sync-agent-sandboxes sandbox-syncer-state configured-framework-id %1 %2)
         message-handlers {:handle-exit-code handle-exit-code
                           :handle-progress-message handle-progress-message}
-        api-client nil
         m8s (M8s. api-client)
         pod-event-notifier (CookPodEventNotifier. conn pool->fenzo)]
     (.pollPodEvents m8s pod-event-notifier)))
@@ -1460,6 +1461,7 @@
   (persist-mea-culpa-failure-limit! conn mea-culpa-failure-limit)
 
   (let [{:keys [match-trigger-chan progress-updater-trigger-chan rank-trigger-chan]} trigger-chans
+        api-client (ApiClientBuilder/build "config/m8s-dev-1.yml")
         pools (pool/all-pools (d/db conn))
         pools' (if (-> pools count pos?)
                  pools
@@ -1488,7 +1490,7 @@
         handle-exit-code (fn handle-exit-code [task-id exit-code]
                            (sandbox/aggregate-exit-code exit-code-syncer-state task-id exit-code))]
     (start-jobs-prioritizer! conn pool-name->pending-jobs-atom task-constraints rank-trigger-chan)
-    {:scheduler (create-mesos-scheduler framework-id gpu-enabled? conn heartbeat-ch pool-name->fenzo pool->offers-chan
-                                        match-trigger-chan handle-exit-code handle-progress-message sandbox-syncer-state)
+    {:api-client (create-mesos-scheduler framework-id gpu-enabled? conn heartbeat-ch pool-name->fenzo pool->offers-chan
+                                        match-trigger-chan handle-exit-code handle-progress-message sandbox-syncer-state api-client)
      :view-incubating-offers (fn get-resources-atom [p]
                                (deref (get pool->resources-atom p)))}))

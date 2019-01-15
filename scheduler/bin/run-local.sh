@@ -18,10 +18,6 @@ SCHEDULER_DIR="$( dirname ${DIR} )"
 : ${ZOOKEEPER_IP:="127.0.0.1"}
 : ${MESOS_NATIVE_JAVA_LIBRARY:="/usr/local/lib/libmesos.dylib"}
 
-if [ -z "$( curl -Is --connect-timeout 2 --max-time 4 http://${MASTER_IP}:5050/state.json | head -1 )" ]; then
-  echo "Mesos master (${MASTER_IP}) is unavailable"
-  exit 1
-fi
 
 NAME=cook-scheduler-${COOK_PORT}
 

@@ -36,6 +36,8 @@
             [metrics.counters :as counters]
             [swiss.arrows :refer :all])
   (:import [org.apache.curator.framework.recipes.leader LeaderSelector LeaderSelectorListener]
+           [io.kubernetes.client ApiClient
+            ApiClientBuilder]
            org.apache.curator.framework.state.ConnectionState))
 
 ;; ============================================================================
@@ -177,7 +179,7 @@
         {:keys [hostname server-port server-https-port]} server-config
         datomic-report-chan (async/chan (async/sliding-buffer 4096))
         mesos-heartbeat-chan (async/chan (async/buffer 4096))
-        current-driver (atom nil)
+        current-api-client (atom nil)
         rebalancer-reservation-atom (atom {})
         leader-selector (LeaderSelector.
                           curator-framework
@@ -191,10 +193,9 @@
                               ;; TODO: get the framework ID and try to reregister
                               (let [normal-exit (atom true)]
                                 (try
-                                  (let [{:keys [scheduler view-incubating-offers]}
+                                  (let [{:keys [api-client view-incubating-offers]}
                                         (sched/create-datomic-scheduler
                                          {:conn mesos-datomic-conn
-                                          :driver-atom current-driver
                                           :exit-code-syncer-state exit-code-syncer-state
                                           :fenzo-fitness-calculator fenzo-fitness-calculator
                                           :fenzo-floor-iterations-before-reset fenzo-floor-iterations-before-reset
@@ -214,42 +215,15 @@
                                           :rebalancer-reservation-atom rebalancer-reservation-atom
                                           :sandbox-syncer-state sandbox-syncer-state
                                           :task-constraints task-constraints
-                                          :trigger-chans trigger-chans})
-                                        driver (make-mesos-driver-fn scheduler framework-id)]
-                                    (mesomatic.scheduler/start! driver)
-                                    (reset! current-driver driver)
+                                          :trigger-chans trigger-chans})]
+                                    (reset! current-api-client api-client)
 
                                     (cook.mesos.monitor/start-collecting-stats)
-                                    (cook.mesos.scheduler/lingering-task-killer mesos-datomic-conn driver task-constraints lingering-task-trigger-chan)
-                                    (cook.mesos.scheduler/straggler-handler mesos-datomic-conn driver straggler-trigger-chan)
-                                    (cook.mesos.scheduler/cancelled-task-killer mesos-datomic-conn driver cancelled-task-trigger-chan)
-                                    (cook.mesos.heartbeat/start-heartbeat-watcher! mesos-datomic-conn mesos-heartbeat-chan)
-                                    (cook.mesos.rebalancer/start-rebalancer! {:config rebalancer-config
-                                                                              :conn mesos-datomic-conn
-                                                                              :driver driver
-                                                                              :agent-attributes-cache agent-attributes-cache
-                                                                              :pool-name->pending-jobs-atom pool-name->pending-jobs-atom
-                                                                              :rebalancer-reservation-atom rebalancer-reservation-atom
-                                                                              :trigger-chan rebalancer-trigger-chan
-                                                                              :view-incubating-offers view-incubating-offers})
-                                    (when (seq optimizer-config)
-                                      (cook.mesos.optimizer/start-optimizer-cycles! (fn get-queue []
-                                                                                      ;; TODO Use filter of queue that scheduler uses to filter to considerable.
-                                                                                      ;;      Specifically, think about filtering to jobs that are waiting and 
-                                                                                      ;;      think about how to handle quota 
-                                                                                      @pool-name->pending-jobs-atom)
-                                                                                    (fn get-running []
-                                                                                      (cook.mesos.util/get-running-task-ents (d/db mesos-datomic-conn)))
-                                                                                    view-incubating-offers
-                                                                                    optimizer-config
-                                                                                    optimizer-trigger-chan))
-                                    (when (:update-data-local-costs-trigger-chan trigger-chans)
-                                      (dl/start-update-cycles! mesos-datomic-conn (:update-data-local-costs-trigger-chan trigger-chans)))
+                                    
+                                    
+                                    
                                     (counters/inc! mesos-leader)
-                                    (async/tap mesos-datomic-mult datomic-report-chan)
-                                    (cook.mesos.scheduler/monitor-tx-report-queue datomic-report-chan mesos-datomic-conn current-driver)
-                                    (mesomatic.scheduler/join! driver)
-                                    (reset! current-driver nil))
+                                    (async/tap mesos-datomic-mult datomic-report-chan))
                                   (catch Throwable e
                                     (log/error e "Lost mesos leadership due to exception")
                                     (reset! normal-exit false))
@@ -263,18 +237,7 @@
                                     (System/exit 0)))))
                             (stateChanged [_ client newState]
                               ;; We will give up our leadership whenever it seems that we lost
-                              ;; ZK connection
-                              (when (#{ConnectionState/LOST ConnectionState/SUSPENDED} newState)
-                                (reset! mesos-leadership-atom false)
-                                (when-let [driver @current-driver]
-                                  (counters/dec! mesos-leader)
-                                  ;; Better to fail over and rely on start up code we trust then rely on rarely run code
-                                  ;; to make sure we yield leadership correctly (and fully)
-                                  (if (-> "COOK.SIMULATION" System/getProperty str Boolean/parseBoolean)
-                                    (log/warn "Lost leadership in zookeeper. Not exiting as simulation is running.")
-                                    (do
-                                      (log/fatal "Lost leadership in zookeeper. Exiting. Expecting a supervisor to restart me!")
-                                      (System/exit 0))))))))]
+                              ;; ZK connection)))]
     (.setId leader-selector (str hostname \#
                                  (or server-port server-https-port) \#
                                  (if server-port "http" "https") \#
@@ -283,7 +246,7 @@
     (.start leader-selector)
     (log/info "Started the mesos leader selector")
     {:submitter (partial submit-to-mesos mesos-datomic-conn)
-     :driver current-driver
+     :api-client current-api-client
      :leader-selector leader-selector
      :framework-id framework-id}))
 
