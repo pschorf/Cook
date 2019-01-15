@@ -1,6 +1,7 @@
 package com.twosigma.m8s;
 
 import io.kubernetes.client.models.V1Event;
+import io.kubernetes.client.models.V1ObjectReference;
 import io.kubernetes.client.util.Watch;
 
 /**
@@ -10,16 +11,27 @@ import io.kubernetes.client.util.Watch;
 public class NamespaceEventsWatcher implements Runnable {
 
     private Watch<V1Event> eventsWatch;
+    private PodEventNotifier notifier;
 
-    public NamespaceEventsWatcher(Watch<V1Event> eventsWatch) {
+    public NamespaceEventsWatcher(Watch<V1Event> eventsWatch, PodEventNotifier notifier) {
         this.eventsWatch = eventsWatch;
+        this.notifier = notifier;
     }
 
     public void run() {
-        System.out.println("watching event");
         while (true) {
-            for (Watch.Response<V1Event> v1EventResponse : this.eventsWatch) {
-                System.out.println(v1EventResponse.object);
+            while(this.eventsWatch.hasNext()) {
+                V1Event event = this.eventsWatch.next().object;
+                V1ObjectReference involvedObject = event.getInvolvedObject();
+                if(involvedObject.getKind().toLowerCase().equals("pod")) {
+                    String podName = involvedObject.getName();
+                    String reason = event.getReason();
+                    if (reason.equals("Killing")) {
+                        this.notifier.handlePodKilled(podName);
+                    } else if (reason.equals("Started")) {
+                        this.notifier.handlePodStarted(podName);
+                    }
+                }
             }
             try {
                 Thread.currentThread().sleep(1000);
