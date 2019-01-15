@@ -167,19 +167,11 @@
 (defn interpret-task-status
   "Converts the status packet from Mesomatic into a more friendly data structure"
   [s]
-  {:task-id (-> s :task-id :value)
-   :reason (:reason s)
+  {:task-id (:name s)
    :task-state (:state s)
-   :progress (try
-               (when (:data s)
-                 (:percent (edn/read-string (String. (.toByteArray (:data s))))))
-               (catch Exception e
-                 (try (log/debug e (str "Error parsing mesos status data to edn."
-                                        "Is it in the format we expect?"
-                                        "String representation: "
-                                        (String. (.toByteArray (:data s)))))
-                      (catch Exception e
-                        (log/debug e "Error reading a string from mesos status data. Is it in the format we expect?")))))})
+   :progress nil
+   :reason (when (= :failed (:state task))
+             :reason-command-executor-failed)})
 
 (defn update-reason-metrics!
   "Updates histograms and counters for run time, cpu time, and memory time,
@@ -207,7 +199,7 @@
 
 (defn handle-status-update
   "Takes a status update from mesos."
-  [conn driver pool->fenzo sync-agent-sandboxes-fn status]
+  [conn pool->fenzo status]
   (log/info "Mesos status is:" status)
   (timers/time!
     handle-status-update-duration
@@ -277,12 +269,12 @@
                        "as instance" instance "with" prior-job-state "and" prior-instance-status
                        "should've been put down already")
              (meters/mark! (meters/meter (metric-title "tasks-killed-in-status-update" pool-name)))
-             (mesos/kill-task! driver {:value task-id}))
+             (comment (mesos/kill-task! driver {:value task-id})))
            (when-not (nil? instance)
-             (when (and (#{:task-starting :task-running} task-state)
-                        (not= :executor/cook (:instance/executor instance-ent)))
-               ;; cook executor tasks should automatically get sandbox directory updates
-               (sync-agent-sandboxes-fn (:instance/hostname instance-ent) task-id))
+             (comment (when (and (#{:task-starting :task-running} task-state)
+                                 (not= :executor/cook (:instance/executor instance-ent)))
+                        ;; cook executor tasks should automatically get sandbox directory updates
+                        (sync-agent-sandboxes-fn (:instance/hostname instance-ent) task-id)))
              ;; (println "update:" task-id task-state job instance instance-status prior-job-state)
              (log/debug "Transacting updated state for instance" instance "to status" instance-status)
              ;; The database can become inconsistent if we make multiple calls to :instance/update-state in a single
@@ -1433,109 +1425,30 @@
                (counters/dec! in-order-queue-counter)
                (body-fn))))))
 
+(defrecord CookPodEventNotifier [conn pool->fenzo]
+  PodEventNotifier
+  (handlePodStarted [_ name]
+    (handle-status-update conn pool->fenzo {:name name
+                                            :state :task-running}))
+  (handlePodFinished [_ name]
+    (handle-status-update conn pool->fenzo {:name name
+                                            :state :task-finished}))
+
+  (handlePodKilled [_ name]
+    (handle-status-update conn pool->fenzo {:name name
+                                            :state :task-failed})))
+
 (defn create-mesos-scheduler
   "Creates the mesos scheduler which processes status updates asynchronously but in order of receipt."
   [configured-framework-id gpu-enabled? conn heartbeat-ch pool->fenzo pool->offers-chan match-trigger-chan
    handle-exit-code handle-progress-message sandbox-syncer-state]
   (let [sync-agent-sandboxes-fn #(sandbox/sync-agent-sandboxes sandbox-syncer-state configured-framework-id %1 %2)
         message-handlers {:handle-exit-code handle-exit-code
-                          :handle-progress-message handle-progress-message}]
-    (mesos/scheduler
-      (registered
-        [this driver framework-id master-info]
-        (log/info "Registered with mesos with framework-id " framework-id)
-        (let [value (-> framework-id mesomatic.types/pb->data :value)]
-          (when (not= configured-framework-id value)
-            (let [message (str "The framework-id provided by Mesos (" value ") "
-                               "does not match the one Cook is configured with (" configured-framework-id ")")]
-              (log/error message)
-              (throw (ex-info message {:framework-id-mesos value :framework-id-cook configured-framework-id})))))
-        (when (and gpu-enabled? (not (re-matches #"1\.\d+\.\d+" (:version master-info))))
-          (binding [*out* *err*]
-            (println "Cannot enable GPU support on pre-mesos 1.0. The version we found was " (:version master-info)))
-          (log/error "Cannot enable GPU support on pre-mesos 1.0. The version we found was " (:version master-info))
-          (Thread/sleep 1000)
-          (System/exit 1))
-        ;; Use future because the thread that runs mesos/scheduler doesn't load classes correctly. for reasons.
-        ;; As Sophie says, you want to future proof your code.
-        (future
-          (try
-            (reconcile-jobs conn)
-            (reconcile-tasks (db conn) driver pool->fenzo)
-            (catch Exception e
-              (log/error e "Reconciliation error")))))
-      (reregistered
-        [this driver master-info]
-        (log/info "Reregistered with new master")
-        (future
-          (try
-            (reconcile-jobs conn)
-            (reconcile-tasks (db conn) driver pool->fenzo)
-            (catch Exception e
-              (log/error e "Reconciliation error")))))
-      ;; Ignore this--we can just wait for new offers
-      (offer-rescinded
-        [this driver offer-id]
-        (comment "TODO: Rescind the offer in fenzo"))
-      (framework-message
-        [this driver executor-id slave-id message]
-        (meters/mark! handle-framework-message-rate)
-        (try
-          (let [{:strs [task-id type] :as parsed-message} (json/read-str (String. ^bytes message "UTF-8"))]
-            (case type
-              "directory" (sandbox/update-sandbox sandbox-syncer-state parsed-message)
-              "heartbeat" (heartbeat/notify-heartbeat heartbeat-ch executor-id slave-id parsed-message)
-              (async-in-order-processing
-                task-id #(handle-framework-message conn message-handlers parsed-message))))
-          (catch Exception e
-            (log/error e "Unable to process framework message"
-                       {:executor-id executor-id, :message message, :slave-id slave-id}))))
-      (disconnected
-        [this driver]
-        (log/error "Disconnected from the previous master"))
-      ;; We don't care about losing slaves or executors--only tasks
-      (slave-lost [this driver slave-id])
-      (executor-lost [this driver executor-id slave-id status])
-      (error
-        [this driver message]
-        (meters/mark! mesos-error)
-        (log/error "Got a mesos error!!!!" message))
-      (resource-offers
-        [this driver offers]
-        (log/debug "Got offers:" offers)
-        (let [pool->offers (group-by (fn [o]
-                                       (or
-                                         (->> o :attributes (filter #(= "cook-pool" (:name %))) first :text)
-                                         "no-pool"))
-                                     offers)
-              using-pools? (config/default-pool)]
-          (log/info "Offers by pool:" (pc/map-vals count pool->offers))
-          (run!
-            (fn [[pool-name offers]]
-              (let [offer-count (count offers)]
-                (if using-pools?
-                  (if-let [offers-chan (get pool->offers-chan pool-name)]
-                    (do
-                      (log/info "Processing" offer-count "offer(s) for known pool" pool-name)
-                      (receive-offers offers-chan match-trigger-chan driver pool-name offers))
-                    (do
-                      (log/warn "Declining" offer-count "offer(s) for non-existent pool" pool-name)
-                      (decline-offers-safe driver offers)))
-                  (if-let [offers-chan (get pool->offers-chan "no-pool")]
-                    (do
-                      (log/info "Processing" offer-count "offer(s) for pool" pool-name "(not using pools)")
-                      (receive-offers offers-chan match-trigger-chan driver pool-name offers))
-                    (do
-                      (log/error "Declining" offer-count "offer(s) for pool" pool-name "(missing no-pool offer chan)")
-                      (decline-offers-safe driver offers))))))
-            pool->offers)
-          (log/debug "Finished receiving offers for all pools")))
-      (status-update
-        [this driver status]
-        (meters/mark! handle-status-update-rate)
-        (let [task-id (-> status :task-id :value)]
-          (async-in-order-processing
-            task-id #(handle-status-update conn driver pool->fenzo sync-agent-sandboxes-fn status)))))))
+                          :handle-progress-message handle-progress-message}
+        api-client nil
+        m8s (M8s. api-client)
+        pod-event-notifier (CookPodEventNotifier. conn pool->fenzo)]
+    (.pollPodEvents m8s pod-event-notifier)))
 
 (defn create-datomic-scheduler
   [{:keys [conn driver-atom exit-code-syncer-state fenzo-fitness-calculator fenzo-floor-iterations-before-reset

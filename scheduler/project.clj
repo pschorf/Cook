@@ -112,7 +112,8 @@
                  [org.apache.curator/curator-test "2.7.1"]
 
                  ;; Dependency management
-                 [mount "0.1.12"]]
+                 [mount "0.1.12"]
+                 [com.twosigma/m8s "0.1-SNAPSHOT"]]
 
   :repositories {"maven2" {:url "https://files.couchbase.com/maven2/"}
                  "sonatype-oss-public" "https://oss.sonatype.org/content/groups/public/"}
