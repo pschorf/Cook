@@ -54,8 +54,8 @@
                              TaskAssignmentResult TaskRequest TaskScheduler TaskScheduler$Builder
                              VMTaskFitnessCalculator VirtualMachineLease VirtualMachineLease$Range
                              VirtualMachineCurrentState]
-          [io.kubernetes.client ApiClient ApiClientBuilder]
-          [com.twosigma.m8s M8s PodEventNotifier]
+          [io.kubernetes.client ApiClient]
+          [com.twosigma.m8s M8s ApiClientBuilder PodEventNotifier]
           [com.netflix.fenzo.functions Action1 Func1]))
 
 (defn now
@@ -172,7 +172,7 @@
   {:task-id (:name s)
    :task-state (:state s)
    :progress nil
-   :reason (when (= :failed (:state task))
+   :reason (when (= :failed (:state s))
              :reason-command-executor-failed)})
 
 (defn update-reason-metrics!
@@ -1461,7 +1461,7 @@
   (persist-mea-culpa-failure-limit! conn mea-culpa-failure-limit)
 
   (let [{:keys [match-trigger-chan progress-updater-trigger-chan rank-trigger-chan]} trigger-chans
-        api-client (ApiClientBuilder/build "config/m8s-dev-1.yml")
+        api-client (ApiClientBuilder/build "../m8s/config/m8s-dev-1.yaml")
         pools (pool/all-pools (d/db conn))
         pools' (if (-> pools count pos?)
                  pools

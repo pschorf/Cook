@@ -36,8 +36,6 @@
             [metrics.counters :as counters]
             [swiss.arrows :refer :all])
   (:import [org.apache.curator.framework.recipes.leader LeaderSelector LeaderSelectorListener]
-           [io.kubernetes.client ApiClient
-            ApiClientBuilder]
            org.apache.curator.framework.state.ConnectionState))
 
 ;; ============================================================================
@@ -219,9 +217,6 @@
                                     (reset! current-api-client api-client)
 
                                     (cook.mesos.monitor/start-collecting-stats)
-                                    
-                                    
-                                    
                                     (counters/inc! mesos-leader)
                                     (async/tap mesos-datomic-mult datomic-report-chan))
                                   (catch Throwable e
@@ -237,7 +232,8 @@
                                     (System/exit 0)))))
                             (stateChanged [_ client newState]
                               ;; We will give up our leadership whenever it seems that we lost
-                              ;; ZK connection)))]
+                              ;; ZK connection
+                              )))]
     (.setId leader-selector (str hostname \#
                                  (or server-port server-https-port) \#
                                  (if server-port "http" "https") \#
