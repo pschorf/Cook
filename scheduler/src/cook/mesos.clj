@@ -223,13 +223,9 @@
                                     (log/error e "Lost mesos leadership due to exception")
                                     (reset! normal-exit false))
                                   (finally
-                                    (counters/dec! mesos-leader)
-                                    (when @normal-exit
-                                      (log/warn "Lost mesos leadership naturally"))
                                     ;; Better to fail over and rely on start up code we trust then rely on rarely run code
                                     ;; to make sure we yield leadership correctly (and fully)
-                                    (log/fatal "Lost mesos leadership. Exiting. Expecting a supervisor to restart me!")
-                                    (System/exit 0)))))
+                                    ))))
                             (stateChanged [_ client newState]
                               ;; We will give up our leadership whenever it seems that we lost
                               ;; ZK connection

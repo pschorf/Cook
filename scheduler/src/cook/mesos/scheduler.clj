@@ -717,7 +717,7 @@
 
 (defn launch-matched-tasks!
   "Updates the state of matched tasks in the database and then launches them."
-  [matches conn db driver fenzo framework-id mesos-run-as-user pool-name]
+  [matches conn db api-client fenzo framework-id mesos-run-as-user pool-name]
   (let [matches (map #(update-match-with-task-metadata-seq % db framework-id mesos-run-as-user) matches)
         task-txns (matches->task-txns matches)]
     ;; Note that this transaction can fail if a job was scheduled
@@ -754,7 +754,11 @@
               :let [offers (mapv :offer leases)
                     task-infos (task/compile-mesos-messages offers task-metadata-seq)]]
         (log/debug "Matched task-infos" task-infos)
-        (mesos/launch-tasks! driver (mapv :id offers) task-infos)
+        ;; TODO(pschorf) - launch tasks
+        ; (mesos/launch-tasks! driver (mapv :id offers) task-infos)
+        (doseq [ti task-infos]
+          
+          (.startPod api-client ))
         (doseq [{:keys [hostname task-request] :as meta} task-metadata-seq]
           ; Iterate over the tasks we matched
           (let [user (get-in task-request [:job :job/user])]
@@ -776,7 +780,7 @@
 (defn handle-resource-offers!
   "Gets a list of offers from mesos. Decides what to do with them all--they should all
    be accepted or rejected at the end of the function."
-  [conn driver ^TaskScheduler fenzo framework-id pool-name->pending-jobs-atom mesos-run-as-user
+  [conn api-client ^TaskScheduler fenzo framework-id pool-name->pending-jobs-atom mesos-run-as-user
    user->usage user->quota num-considerable offers-chan offers rebalancer-reservation-atom pool-name]
   (log/debug "In" pool-name "pool, invoked handle-resource-offers!")
   (let [offer-stash (atom nil)] ;; This is a way to ensure we never lose offers fenzo assigned if an error occurs in the middle of processing
@@ -821,7 +825,7 @@
             (do
               (swap! pool-name->pending-jobs-atom remove-matched-jobs-from-pending-jobs matched-job-uuids pool-name)
               (log/debug "In" pool-name "pool, updated pool-name->pending-jobs-atom:" @pool-name->pending-jobs-atom)
-              (launch-matched-tasks! matches conn db driver fenzo framework-id mesos-run-as-user pool-name)
+              (launch-matched-tasks! matches conn db api-client fenzo framework-id mesos-run-as-user pool-name)
               (update-host-reservations! rebalancer-reservation-atom matched-job-uuids)
               matched-considerable-jobs-head?)))
         (catch Throwable t
@@ -851,7 +855,7 @@
 (counters/defcounter [cook-mesos scheduler offer-chan-depth])
 
 (defn make-offer-handler
-  [conn driver-atom fenzo framework-id pool-name->pending-jobs-atom agent-attributes-cache max-considerable scaleback
+  [conn api-client fenzo framework-id pool-name->pending-jobs-atom agent-attributes-cache max-considerable scaleback
    floor-iterations-before-warn floor-iterations-before-reset trigger-chan rebalancer-reservation-atom
    mesos-run-as-user pool-name]
   (let [chan-length 100
@@ -900,7 +904,7 @@
                       _ (log/debug "In" pool-name "pool, passing following offers to handle-resource-offers!" offers)
                       using-pools? (not (nil? (config/default-pool)))
                       user->quota (quota/create-user->quota-fn (d/db conn) (if using-pools? pool-name nil))
-                      matched-head? (handle-resource-offers! conn @driver-atom fenzo framework-id pool-name->pending-jobs-atom
+                      matched-head? (handle-resource-offers! conn api-client fenzo framework-id pool-name->pending-jobs-atom
                                                              mesos-run-as-user @user->usage-future user->quota
                                                              num-considerable offers-chan offers
                                                              rebalancer-reservation-atom pool-name)]
@@ -1341,7 +1345,7 @@
 (meters/defmeter [cook-mesos scheduler offer-chan-full-error])
 
 (defn make-fenzo-scheduler
-  [driver offer-incubate-time-ms fitness-calculator good-enough-fitness]
+  [api-client offer-incubate-time-ms fitness-calculator good-enough-fitness]
   (.. (TaskScheduler$Builder.)
       (disableShortfallEvaluation) ;; We're not using the autoscaling features
       (withLeaseOfferExpirySecs (max (-> offer-incubate-time-ms time/millis time/in-seconds) 1)) ;; should be at least 1 second
@@ -1352,15 +1356,16 @@
                                          (> fitness good-enough-fitness))))
       (withLeaseRejectAction (reify Action1
                                (call [_ lease]
-                                 (let [offer (:offer lease)
-                                       id (:id offer)]
-                                   (log/debug "Fenzo is declining offer" offer)
-                                   (if-let [driver @driver]
-                                     (try
-                                       (decline-offers driver [id])
-                                       (catch Exception e
-                                         (log/error e "Unable to decline fenzos rejected offers")))
-                                     (log/error "Unable to decline offer; no current driver"))))))
+                                 ;; TODO(pschorf) - implement?
+                                 (comment (let [offer (:offer lease)
+                                                id (:id offer)]
+                                            (log/debug "Fenzo is declining offer" offer)
+                                            (if-let [driver @driver]
+                                              (try
+                                                (decline-offers driver [id])
+                                                (catch Exception e
+                                                  (log/error e "Unable to decline fenzos rejected offers")))
+                                              (log/error "Unable to decline offer; no current driver")))))))
       (build)))
 
 (defn persist-mea-culpa-failure-limit!
@@ -1452,7 +1457,7 @@
     (.pollPodEvents m8s pod-event-notifier)))
 
 (defn create-datomic-scheduler
-  [{:keys [conn driver-atom exit-code-syncer-state fenzo-fitness-calculator fenzo-floor-iterations-before-reset
+  [{:keys [conn exit-code-syncer-state fenzo-fitness-calculator fenzo-floor-iterations-before-reset
            fenzo-floor-iterations-before-warn fenzo-max-jobs-considered fenzo-scaleback framework-id good-enough-fitness
            gpu-enabled? heartbeat-ch mea-culpa-failure-limit mesos-run-as-user agent-attributes-cache offer-incubate-time-ms
            pool-name->pending-jobs-atom progress-config rebalancer-reservation-atom sandbox-syncer-state task-constraints
@@ -1466,7 +1471,7 @@
         pools' (if (-> pools count pos?)
                  pools
                  [{:pool/name "no-pool"}])
-        pool-name->fenzo (pool-map pools' (fn [_] (make-fenzo-scheduler driver-atom offer-incubate-time-ms
+        pool-name->fenzo (pool-map pools' (fn [_] (make-fenzo-scheduler api-client offer-incubate-time-ms
                                                                         fenzo-fitness-calculator good-enough-fitness)))
         {:keys [pool->offers-chan pool->resources-atom]}
         (reduce (fn [m pool-ent]
@@ -1474,7 +1479,7 @@
                         fenzo (pool-name->fenzo pool-name)
                         [offers-chan resources-atom]
                         (make-offer-handler
-                          conn driver-atom fenzo framework-id pool-name->pending-jobs-atom agent-attributes-cache fenzo-max-jobs-considered
+                          conn api-client fenzo framework-id pool-name->pending-jobs-atom agent-attributes-cache fenzo-max-jobs-considered
                           fenzo-scaleback fenzo-floor-iterations-before-warn fenzo-floor-iterations-before-reset
                           match-trigger-chan rebalancer-reservation-atom mesos-run-as-user pool-name)]
                     (-> m
