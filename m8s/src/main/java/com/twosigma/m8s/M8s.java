@@ -7,14 +7,10 @@ import io.kubernetes.client.ApiException;
 import io.kubernetes.client.apis.CoreV1Api;
 import io.kubernetes.client.models.*;
 import io.kubernetes.client.custom.Quantity;
-import io.kubernetes.client.proto.Resource;
 import io.kubernetes.client.util.Watch;
 
 import java.math.BigDecimal;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -22,6 +18,8 @@ import java.util.concurrent.Executors;
  * Created by rodrigo on 1/15/19.
  */
 public class M8s {
+
+    private static final String SECRET_PREFIX = "kerberosticket.";
 
     private ApiClient apiClient;
     private CoreV1Api coreV1Api;
@@ -31,6 +29,18 @@ public class M8s {
     public M8s(ApiClient apiClient) {
         this.apiClient = apiClient;
         this.coreV1Api = new CoreV1Api(this.apiClient);
+    }
+
+    public void populateOrRefreshKerberosTicket(String username) throws ApiException {
+        Map<String, String> data = new HashMap<>();
+        data.put("ts_kerberos_ticket", UUID.randomUUID().toString());
+        V1Secret secret = new V1SecretBuilder()
+                .withMetadata(new V1ObjectMetaBuilder()
+                        .withName(SECRET_PREFIX + username)
+                        .build())
+                .withStringData(data)
+                .build();
+        this.coreV1Api.createNamespacedSecret("default", secret, null);
     }
 
     private Map<String, Quantity> sumMaps(Map<String, Quantity> x, Map<String, Quantity> y) {
@@ -113,7 +123,7 @@ public class M8s {
     public Map<String, Map<String, Quantity>> getAvailableResources() throws ApiException {
         Map<String, Map<String, Quantity>> used = this.collectedUsedResources();
         Map<String, Map<String, Quantity>> allocatable = this.collectAllocatableResources();
-        
+
         Map<String, Map<String, Quantity>> available = new HashMap<>();
         for (String node : allocatable.keySet()) {
             if (used.containsKey(node)) {
@@ -138,7 +148,7 @@ public class M8s {
         return available;
     }
 
-    public void startPod(double cpus, int memoryMb, String image, String command, String uuid) throws ApiException {
+    public void startPod(String username, double cpus, int memoryMb, String image, String command, String uuid) throws ApiException {
         String namespace = "default";
         Map<String, Quantity> requests = new HashMap<>();
         requests.put("cpu", Quantity.fromString(Double.toString(cpus)));
@@ -151,13 +161,28 @@ public class M8s {
                         .withName(uuid)
                         .build())
                 .withSpec(new V1PodSpecBuilder()
+                        .withVolumes(new V1VolumeBuilder()
+                                .withName("kerberosticket")
+                                .withSecret(new V1SecretVolumeSourceBuilder()
+                                        .withSecretName(SECRET_PREFIX + username)
+                                        .withItems(new V1KeyToPathBuilder()
+                                                .withKey("ts_kerberos_ticket")
+                                                .withPath("kerbticket")
+                                                .build())
+                                        .build())
+                                .build())
                         .withContainers(new V1ContainerBuilder()
                                 .withName("container-name")
+                                .withVolumeMounts(new V1VolumeMountBuilder()
+                                        .withName("kerberosticket")
+                                        .withMountPath("/tmp")
+                                        .withReadOnly(true)
+                                        .build())
                                 .withResources(new V1ResourceRequirementsBuilder()
                                         .withRequests(requests)
                                         .build())
                                 .withImage(image)
-                                .withCommand(command)
+                                //.withCommand(command)
                                 .build())
                         .build())
                 .build();

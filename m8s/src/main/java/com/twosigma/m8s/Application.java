@@ -22,6 +22,7 @@ public class Application {
         M8s m8 = new M8s(apiClient);
 
         // Start polling pod events, atm we only care about pods started and killed.
+
         m8.pollPodEvents(new PodEventNotifier() {
             public void handlePodStarted(String podName, String message, DateTime firstTimestamp, DateTime lastTimestamp) {
                 System.out.println(String.format("Pod %s started with message [%s] at (first) %s (last) %s",
@@ -51,7 +52,9 @@ public class Application {
 
         // Create dummy container
         String uuid = UUID.randomUUID().toString();
-        m8.startPod(0.5, 128, "nginx:latest", "echo test", uuid);
+        //m8.startPod("rodrigo", 0.5, 128, "nginx:latest", "echo test", uuid);
+
+        //m8.populateOrRefreshKerberosTicket("rodrigo");
 
         // Pull available resources
         for (Map.Entry<String, Map<String, Quantity>> stringMapEntry : m8.getAvailableResources().entrySet()) {
