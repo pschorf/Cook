@@ -7,8 +7,9 @@ import org.joda.time.DateTime;
  */
 public interface PodEventNotifier {
 
-    void handlePodStarted(String podName, DateTime firstTimestamp, DateTime lastTimestamp);
-    void handlePodFinished(String podName, DateTime firstTimestamp, DateTime lastTimestamp);
-    void handlePodKilled(String podName, DateTime firstTimestamp, DateTime lastTimestamp);
-
+    void handlePodStarted(String podName, String message, DateTime firstTimestamp, DateTime lastTimestamp);
+    void handlePodFinished(String podName, String message, DateTime firstTimestamp, DateTime lastTimestamp);
+    void handlePodKilled(String podName, String message, DateTime firstTimestamp, DateTime lastTimestamp);
+    void handlePodFailed(String podName, String message, DateTime firstTimestamp, DateTime lastTimestamp);
+    void handlePodFailedScheduling(String podName, String message, DateTime firstTimestamp, DateTime lastTimestamp);
 }

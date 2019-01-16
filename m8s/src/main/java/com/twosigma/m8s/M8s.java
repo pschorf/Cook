@@ -7,12 +7,10 @@ import io.kubernetes.client.ApiException;
 import io.kubernetes.client.apis.CoreV1Api;
 import io.kubernetes.client.models.*;
 import io.kubernetes.client.custom.Quantity;
-//import io.kubernetes.client.proto.Resource;
 import io.kubernetes.client.util.Watch;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -31,7 +29,7 @@ public class M8s {
         this.coreV1Api = new CoreV1Api(this.apiClient);
     }
 
-    public void startPod(double cpus, int memoryMb, String image, String uuid) throws ApiException {
+    public void startPod(double cpus, int memoryMb, String image, String command, String uuid) throws ApiException {
         String namespace = "default";
         Map<String, Quantity> requests = new HashMap<String, Quantity>();
         requests.put("cpu", Quantity.fromString(Double.toString(cpus)));
@@ -50,6 +48,7 @@ public class M8s {
                                         .withRequests(requests)
                                         .build())
                                 .withImage(image)
+                                .withCommand(command)
                                 .build())
                         .build())
                 .build();
