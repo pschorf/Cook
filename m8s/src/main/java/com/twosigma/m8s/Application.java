@@ -2,9 +2,11 @@ package com.twosigma.m8s;
 
 import io.kubernetes.client.ApiClient;
 import io.kubernetes.client.ApiException;
+import io.kubernetes.client.custom.Quantity;
 import org.joda.time.DateTime;
 
 import java.io.IOException;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -47,9 +49,14 @@ public class Application {
             }
         });
 
-        Thread.currentThread().sleep(3000);
+        // Create dummy container
         String uuid = UUID.randomUUID().toString();
-        m8.startPod(0.5, 128, "nginx:latest", "sleep 60", uuid);
+        m8.startPod(0.5, 128, "nginx:latest", "echo test", uuid);
+
+        // Pull available resources
+        for (Map.Entry<String, Map<String, Quantity>> stringMapEntry : m8.getAvailableResources().entrySet()) {
+            System.out.println(stringMapEntry);
+        }
     }
 
 }
