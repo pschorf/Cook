@@ -20,7 +20,7 @@
                 </configuration>
             </plugin>
 
-            <!--<plugin>
+            <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
                 <version>3.0.0</version>
@@ -44,7 +44,7 @@
                         </filter>
                     </filters>
                 </configuration>
-            </plugin>-->
+            </plugin>
         </plugins>
     </build>
 
@@ -55,9 +55,29 @@
             <version>1.0.1</version>
         </dependency>
         <dependency>
+            <groupId>com.google.apis</groupId>
+            <artifactId>google-api-services-container</artifactId>
+            <version>v1-rev57-1.25.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.http-client</groupId>
+            <artifactId>google-http-client-jackson2</artifactId>
+            <version>1.23.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.oauth-client</groupId>
+            <artifactId>google-oauth-client-jetty</artifactId>
+            <version>1.23.0</version>
+        </dependency>
+        <dependency>
             <groupId>com.netflix.fenzo</groupId>
             <artifactId>fenzo-core</artifactId>
             <version>1.0.1</version>
+        </dependency>
+        <dependency>
+            <groupId>twosigma</groupId>
+            <artifactId>cook-jobclient</artifactId>
+            <version>0.2.1-SNAPSHOT</version>
         </dependency>
         <dependency>
             <groupId>io.kubernetes</groupId>
