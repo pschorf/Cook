@@ -403,6 +403,36 @@
 ;;; API for matcher
 ;;; ===========================================================================
 
+(defn double-resource-value [map resource-name]
+  (when (contains? map resource-name)
+    (-> map
+        (get resource-name)
+        .getNumber
+        .doubleValue)))
+
+(defrecord M8sLeaseAdapter [id time node resource-map]
+  VirtualMachineLease
+  (cpuCores [_] (double-resource-value resource-map "cpu"))
+  (diskMB [_] 0.0)
+  (getScalarValue [_ name] (or (double-resource-value resource-map name)
+                               0.0))
+  (getScalarValues [_] (pc/map-from-keys (fn [resource-name]
+                                           (double-resource-value resource-map resource-name))
+                                         (keys resource-map)))
+  (getAttributeMap [_] {"HOSTNAME" node})
+  (getId [_] id)
+  (getOffer [_] (throw (UnsupportedOperationException.)))
+  (getOfferedTime [_] time)
+  (getVMID [_] node)
+  (hostname [_] node)
+  (memoryMB [_] (/ (double-resource-value resource-map "memory") (* 1024 1024)))
+  (networkMbps [_] 0.0)
+  (portRanges [_] [])
+
+  Object
+  (toString [this]
+    (str ("M8sLeaseAdapter{" id "," node ": " (.getScalarValues this)))))
+
 (defrecord VirtualMachineLeaseAdapter [offer time]
   VirtualMachineLease
   (cpuCores [_] (or (offer-resource-scalar offer "cpus") 0.0))
@@ -526,13 +556,15 @@
             :failures (list of unmatched tasks, and why they weren't matched)}"
   [db ^TaskScheduler fenzo considerable offers rebalancer-reservation-atom]
   (log/info "Matching" (count offers) "offers to" (count considerable) "jobs with fenzo")
-  (log/debug "offers to scheduleOnce" offers)
+  (log/debug "offers to scheduleOnce" (map (fn [avm]
+                                             (str (.hostname avm) " " (.getScalarValues avm)))
+                                           offers))
   (log/debug "tasks to scheduleOnce" considerable)
   (dl/update-cost-staleness-metric considerable)
   (let [t (System/currentTimeMillis)
         _ (log/debug "offer to scheduleOnce" offers)
         _ (log/debug "tasks to scheduleOnce" considerable)
-        leases (mapv #(->VirtualMachineLeaseAdapter % t) offers)
+        leases offers
         considerable->task-id (plumbing.core/map-from-keys (fn [_] (str (d/squuid))) considerable)
         guuid->considerable-cotask-ids (util/make-guuid->considerable-cotask-ids considerable->task-id)
         running-cotask-cache (atom (cache/fifo-cache-factory {} :threshold (max 1 (count considerable))))
@@ -854,6 +886,12 @@
 (meters/defmeter [cook-mesos scheduler fenzo-abandon-and-reset-meter])
 (counters/defcounter [cook-mesos scheduler offer-chan-depth])
 
+(defn get-m8s-offers [api-client]
+  (let [available-resources (.getAvailableResources api-client)]
+    (map (fn [[node resource-map]]
+           (M8sLeaseAdapter. (str (java.util.UUID/randomUUID)) (System/currentTimeMillis) node resource-map))
+         available-resources)))
+
 (defn make-offer-handler
   [conn api-client fenzo framework-id pool-name->pending-jobs-atom agent-attributes-cache max-considerable scaleback
    floor-iterations-before-warn floor-iterations-before-reset trigger-chan rebalancer-reservation-atom
@@ -888,11 +926,12 @@
                       ;;     When this happens, users should never exceed their quota
                       user->usage-future (future (generate-user-usage-map (d/db conn) pool-name))
                       ;; Try to clear the channel
-                      offers (->> (util/read-chan offers-chan chan-length)
-                                  ((fn decrement-offer-chan-depth [offer-lists]
-                                     (counters/dec! offer-chan-depth (count offer-lists))
-                                     offer-lists))
-                                  (reduce into []))
+                      offers (get-m8s-offers api-client)
+                      ;; (->> (util/read-chan offers-chan chan-length)
+                      ;;            ((fn decrement-offer-chan-depth [offer-lists]
+                      ;;               (counters/dec! offer-chan-depth (count offer-lists))
+                      ;;               offer-lists))
+                      ;;            (reduce into []))
                       _ (doseq [offer offers
                                 :let [slave-id (-> offer :slave-id :value)
                                       attrs (get-offer-attr-map offer)]]
@@ -1434,14 +1473,20 @@
 
 (defrecord CookPodEventNotifier [conn pool->fenzo]
   PodEventNotifier
-  (handlePodStarted [_ name]
+  (handlePodStarted [_ name _ _ _]
     (handle-status-update conn pool->fenzo {:name name
                                             :state :task-running}))
-  (handlePodFinished [_ name]
+  (handlePodFinished [_ name _ _ _]
     (handle-status-update conn pool->fenzo {:name name
                                             :state :task-finished}))
 
-  (handlePodKilled [_ name]
+  (handlePodKilled [_ name _ _ _]
+    (handle-status-update conn pool->fenzo {:name name
+                                            :state :task-failed}))
+  (handlePodFailed [_ name _ _ _]
+    (handle-status-update conn pool->fenzo {:name name
+                                            :state :task-failed}))
+  (handlePodFailedScheduling [_ name _ _ _]
     (handle-status-update conn pool->fenzo {:name name
                                             :state :task-failed})))
 
@@ -1452,9 +1497,8 @@
   (let [sync-agent-sandboxes-fn #(sandbox/sync-agent-sandboxes sandbox-syncer-state configured-framework-id %1 %2)
         message-handlers {:handle-exit-code handle-exit-code
                           :handle-progress-message handle-progress-message}
-        m8s (M8s. api-client)
         pod-event-notifier (CookPodEventNotifier. conn pool->fenzo)]
-    (.pollPodEvents m8s pod-event-notifier)))
+    (.pollPodEvents api-client pod-event-notifier)))
 
 (defn create-datomic-scheduler
   [{:keys [conn exit-code-syncer-state fenzo-fitness-calculator fenzo-floor-iterations-before-reset
@@ -1466,7 +1510,7 @@
   (persist-mea-culpa-failure-limit! conn mea-culpa-failure-limit)
 
   (let [{:keys [match-trigger-chan progress-updater-trigger-chan rank-trigger-chan]} trigger-chans
-        api-client (ApiClientBuilder/build "../m8s/config/m8s-dev-1.yaml")
+        api-client (M8s. (ApiClientBuilder/build "../m8s/config/m8s-dev-1.yaml"))
         pools (pool/all-pools (d/db conn))
         pools' (if (-> pools count pos?)
                  pools
