@@ -416,9 +416,10 @@
   (diskMB [_] 0.0)
   (getScalarValue [_ name] (or (double-resource-value resource-map name)
                                0.0))
-  (getScalarValues [_] (pc/map-from-keys (fn [resource-name]
-                                           (double-resource-value resource-map resource-name))
-                                         (keys resource-map)))
+  (getScalarValues [_] (-> (pc/map-from-keys (fn [resource-name]
+                                               (double-resource-value resource-map resource-name))
+                                             (keys resource-map))
+                           (clojure.set/rename-keys {"cpu" "cpus", "memory" "mem"})))
   (getAttributeMap [_] {"HOSTNAME" node})
   (getId [_] id)
   (getOffer [_] (throw (UnsupportedOperationException.)))
@@ -431,7 +432,7 @@
 
   Object
   (toString [this]
-    (str ("M8sLeaseAdapter{" id "," node ": " (.getScalarValues this)))))
+    (str "M8sLeaseAdapter{" id "," node ": " (.getScalarValues this))))
 
 (defrecord VirtualMachineLeaseAdapter [offer time]
   VirtualMachineLease
@@ -557,12 +558,11 @@
   [db ^TaskScheduler fenzo considerable offers rebalancer-reservation-atom]
   (log/info "Matching" (count offers) "offers to" (count considerable) "jobs with fenzo")
   (log/debug "offers to scheduleOnce" (map (fn [avm]
-                                             (str (.hostname avm) " " (.getScalarValues avm)))
+                                             (str (.hostname avm) " " (.getScalarValues avm) " " (.memoryMB avm) " " (.cpuCores avm)))
                                            offers))
   (log/debug "tasks to scheduleOnce" considerable)
   (dl/update-cost-staleness-metric considerable)
   (let [t (System/currentTimeMillis)
-        _ (log/debug "offer to scheduleOnce" offers)
         _ (log/debug "tasks to scheduleOnce" considerable)
         leases offers
         considerable->task-id (plumbing.core/map-from-keys (fn [_] (str (d/squuid))) considerable)
@@ -725,8 +725,7 @@
   "Converts matches to a task transactions."
   [matches]
   (for [{:keys [leases task-metadata-seq]} matches
-        :let [offers (mapv :offer leases)
-              slave-id (-> offers first :slave-id :value)]
+        :let [slave-id (-> leases first :node)]
         {:keys [executor hostname ports-assigned task-id task-request]} task-metadata-seq
         :let [job-ref [:job/uuid (get-in task-request [:job :job/uuid])]]]
     [[:job/allowed-to-start? job-ref]
@@ -752,6 +751,7 @@
   [matches conn db api-client fenzo framework-id mesos-run-as-user pool-name]
   (let [matches (map #(update-match-with-task-metadata-seq % db framework-id mesos-run-as-user) matches)
         task-txns (matches->task-txns matches)]
+    (log/debug "task-txns:" task-txns)
     ;; Note that this transaction can fail if a job was scheduled
     ;; during a race. If that happens, then other jobs that should
     ;; be scheduled will not be eligible for rescheduling until
@@ -782,15 +782,24 @@
     (timers/time!
       (timers/timer (metric-title "handle-resource-offer!-mesos-submit-duration" pool-name))
       ;; Iterates over offers (each offer can match to multiple tasks)
-      (doseq [{:keys [leases task-metadata-seq]} matches
-              :let [offers (mapv :offer leases)
-                    task-infos (task/compile-mesos-messages offers task-metadata-seq)]]
-        (log/debug "Matched task-infos" task-infos)
+      (doseq [{:keys [leases task-metadata-seq]} matches]
+        (log/debug "Matched task-infos" {:leases leases
+                                         :task-metadata-seq task-metadata-seq})
         ;; TODO(pschorf) - launch tasks
         ; (mesos/launch-tasks! driver (mapv :id offers) task-infos)
-        (doseq [ti task-infos]
-          
-          (.startPod api-client ))
+        (doseq [task-metadata task-metadata-seq]
+          (let [task-request (:task-request task-metadata)
+                cpus (get-in task-request [:resources :cpus])
+                mem (get-in task-request [:resources :mem])
+                image (get-in task-metadata [:container :docker :image])
+                command (get-in task-request [:job :job/command])
+                instance-id (:task-id task-metadata)]
+            (log/debug "launching job" {:cpus cpus
+                                        :mem mem
+                                        :image image
+                                        :command command
+                                        :instance-id instance-id})
+            (.startPod api-client cpus mem image command instance-id)))
         (doseq [{:keys [hostname task-request] :as meta} task-metadata-seq]
           ; Iterate over the tasks we matched
           (let [user (get-in task-request [:job :job/user])]
@@ -1517,15 +1526,17 @@
                  [{:pool/name "no-pool"}])
         pool-name->fenzo (pool-map pools' (fn [_] (make-fenzo-scheduler api-client offer-incubate-time-ms
                                                                         fenzo-fitness-calculator good-enough-fitness)))
+        match-trigger-mult (async/mult match-trigger-chan)
         {:keys [pool->offers-chan pool->resources-atom]}
         (reduce (fn [m pool-ent]
                   (let [pool-name (:pool/name pool-ent)
                         fenzo (pool-name->fenzo pool-name)
+                        match-trigger-chan (async/chan)
                         [offers-chan resources-atom]
                         (make-offer-handler
                           conn api-client fenzo framework-id pool-name->pending-jobs-atom agent-attributes-cache fenzo-max-jobs-considered
                           fenzo-scaleback fenzo-floor-iterations-before-warn fenzo-floor-iterations-before-reset
-                          match-trigger-chan rebalancer-reservation-atom mesos-run-as-user pool-name)]
+                          (async/tap match-trigger-mult match-trigger-chan) rebalancer-reservation-atom mesos-run-as-user pool-name)]
                     (-> m
                         (assoc-in [:pool->offers-chan pool-name] offers-chan)
                         (assoc-in [:pool->resources-atom pool-name] resources-atom))))

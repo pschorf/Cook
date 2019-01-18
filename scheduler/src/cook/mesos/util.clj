@@ -748,16 +748,20 @@
   [ch f & [{:keys [error-handler on-finished]
             :or {error-handler identity
                  on-finished #()}}]]
-  (async/go-loop []
-    (if-let [x (async/<! ch)]
-      (do (async/<! (async/thread
-                      (try
-                        (f)
-                        (catch Exception e
-                          (error-handler e)))))
-          (close-when-ch! x)
-          (recur))
-      (on-finished)))
+  (let [outer-ex (RuntimeException. "Error in go-loop")]
+    (async/go-loop []
+      (if-let [x (try
+                   (async/<! ch)
+                   (catch Throwable e
+                     (throw outer-ex)))]
+        (do (async/<! (async/thread
+                        (try
+                          (f)
+                          (catch Exception e
+                            (error-handler e)))))
+            (close-when-ch! x)
+            (recur))
+        (on-finished))))
   (fn cancel! []
     (async/close! ch)))
 
