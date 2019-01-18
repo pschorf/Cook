@@ -161,6 +161,7 @@ public class M8s {
                         .withName(uuid)
                         .build())
                 .withSpec(new V1PodSpecBuilder()
+                        .withRestartPolicy("Never")
                         .withVolumes(new V1VolumeBuilder()
                                 .withName("kerberosticket")
                                 .withSecret(new V1SecretVolumeSourceBuilder()
@@ -182,7 +183,8 @@ public class M8s {
                                         .withRequests(requests)
                                         .build())
                                 .withImage(image)
-                                //.withCommand(command)
+                                .withCommand("/bin/sh")
+                                .withArgs("-c", command)
                                 .build())
                         .build())
                 .build();

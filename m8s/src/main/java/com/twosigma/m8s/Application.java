@@ -52,6 +52,7 @@ public class Application {
 
         // Create dummy container
         String uuid = UUID.randomUUID().toString();
+        System.out.println("Starting pod with uuid " + uuid);
         //m8.startPod("rodrigo", 0.5, 128, "nginx:latest", "echo test", uuid);
 
         //m8.populateOrRefreshKerberosTicket("rodrigo");
