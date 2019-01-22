@@ -1,8 +1,6 @@
 package com.twosigma.m8s;
 
-import com.twosigma.cook.jobclient.JobClient;
-import com.twosigma.cook.jobclient.Group;
-import com.twosigma.cook.jobclient.Job;
+import com.google.api.client.googleapis.auth.oauth2.GoogleCredential;
 import io.kubernetes.client.ApiClient;
 
 import com.google.api.services.container.model.ListNodePoolsResponse;
@@ -18,15 +16,12 @@ import com.google.api.client.http.HttpTransport;
 import com.google.api.client.json.JsonFactory;
 import com.google.api.client.json.jackson2.JacksonFactory;
 import com.google.api.client.util.store.DataStoreFactory;
-import com.google.api.client.util.store.FileDataStoreFactory;
 import com.google.api.services.container.Container;
 import com.google.api.services.container.ContainerScopes;
 
+import java.io.FileInputStream;
 import java.io.InputStreamReader;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 
 public class AutoScaler {
     private static final String APPLICATION_NAME = "AutoScaler";
@@ -34,7 +29,8 @@ public class AutoScaler {
 
     private final ApiClient k8sClient;
     private final Container gkeClient;
-    private final JobClient cookJobClient;
+    private final CookAdminClientInterface cookAdminClient;
+    private Map<String, Integer> waitingTaskIdToOccurences = new HashMap<>();
 
     private static HttpTransport httpTransport;
     private static DataStoreFactory dataStoreFactory;
@@ -54,10 +50,10 @@ public class AutoScaler {
      */
     private static final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
 
-    public AutoScaler(ApiClient k8sClient, Container gkeClient, JobClient cookJobClient) {
+    public AutoScaler(ApiClient k8sClient, Container gkeClient, CookAdminClientInterface cookAdminClient) {
         this.k8sClient = k8sClient;
         this.gkeClient = gkeClient;
-        this.cookJobClient = cookJobClient;
+        this.cookAdminClient = cookAdminClient;
     }
 
     public void run() throws Exception {
@@ -75,13 +71,28 @@ public class AutoScaler {
     }
 
     private boolean cookQueueBusy() throws Exception {
-        Group group = new Group.Builder().setName("name").build();
-        Map<UUID, Job> jobMap = this.cookJobClient.queryGroupJobs(group);
-        for (Map.Entry<UUID, Job> entry : jobMap.entrySet()) {
-            if (entry.getValue().getStatus().equals(Job.Status.WAITING)) {
-                return true;
+        List<CookJobInstance> instances = this.cookAdminClient.getCookQueue();
+        Map<String, Integer> newWaitingTaskIdToOccurences = new HashMap<>();
+        for (CookJobInstance instance : instances) {
+            if (instance.getStatus().equals("instance.status/waiting")) {
+                newWaitingTaskIdToOccurences.put(instance.getTaskId(), 1);
             }
         }
+
+        for (String taskId : this.waitingTaskIdToOccurences.keySet()) {
+            if (newWaitingTaskIdToOccurences.containsKey(taskId)) {
+                int newValue = this.waitingTaskIdToOccurences.get(taskId) + newWaitingTaskIdToOccurences.get(taskId);
+                newWaitingTaskIdToOccurences.put(taskId, newValue);
+                // If an instance is in waiting state twice in a row, consider the queue busy and needs to be scaled up
+                if (newValue >= 5) {
+                    System.out.println("Task " + taskId + " is busy for " + newValue + " times");
+                    this.waitingTaskIdToOccurences = new HashMap<>();
+                    return true;
+                }
+            }
+        }
+
+        this.waitingTaskIdToOccurences = newWaitingTaskIdToOccurences;
         return false;
     }
 
@@ -94,12 +105,16 @@ public class AutoScaler {
         ListNodePoolsResponse listNodePoolsResponse = listNodePoolsRequest.execute();
         List<NodePool> pools = listNodePoolsResponse.getNodePools();
         NodePool defaultPool = pools.get(0);
+
+        // TODO: This group size is wrong, need to query the instance group
         int currentPoolSize = defaultPool.size();
+        String machineGroupUrl = defaultPool.getInstanceGroupUrls().get(0);
 
         // API reference: https://cloud.google.com/kubernetes-engine/docs/reference/rest/v1/projects.locations.clusters.nodePools/setSize
-        String poolName = String.format("'projects/%s/locations/%s/clusters/%s/nodePools/%s",
+        String poolName = String.format("projects/%s/locations/%s/clusters/%s/nodePools/%s",
                 projectId, location, cluster, defaultPool.getName());
         int newPoolSize = currentPoolSize + 1;
+        System.out.println("Resize node pool " + poolName + " from " + currentPoolSize + " to " + newPoolSize);
         SetNodePoolSizeRequest setNodePoolSizeRequest = new SetNodePoolSizeRequest().setNodeCount(newPoolSize);
         Container.Projects.Locations.Clusters.NodePools.SetSize setSizeRequest =
                 this.gkeClient.projects().locations().clusters().nodePools().setSize(poolName, setNodePoolSizeRequest);
@@ -112,7 +127,7 @@ public class AutoScaler {
     private static Credential authorize(String clientSecretFilename) throws Exception {
         // initialize client secrets object
         GoogleClientSecrets clientSecrets = GoogleClientSecrets.load(JSON_FACTORY, new InputStreamReader(
-                AutoScaler.class.getResourceAsStream(clientSecretFilename)));
+                new FileInputStream(clientSecretFilename)));
         // set up authorization code flow
         GoogleAuthorizationCodeFlow flow = new GoogleAuthorizationCodeFlow.Builder(
                 httpTransport, JSON_FACTORY, clientSecrets, SCOPES).setDataStoreFactory(dataStoreFactory)
@@ -123,31 +138,29 @@ public class AutoScaler {
 
     /**
      * Build a GKE client
+     * API Example: https://github.com/google/google-api-java-client-samples/tree/master/compute-engine-cmdline-sample
      */
     private static Container buildGkeClient(String clientSecretFilename) throws Exception {
-        httpTransport = GoogleNetHttpTransport.newTrustedTransport();
-        dataStoreFactory = new FileDataStoreFactory(DATA_STORE_DIR);
-        // Authorization
-        Credential credential = authorize(clientSecretFilename);
+        List<String> scopes = new ArrayList<>();
+        scopes.add("https://www.googleapis.com/auth/cloud-platform");
+
+        GoogleCredential credential = GoogleCredential.fromStream(new FileInputStream(clientSecretFilename))
+                .createScoped(scopes);
 
         // Create compute engine object for listing instances
+        httpTransport = GoogleNetHttpTransport.newTrustedTransport();
         Container gkeClient = new Container.Builder(
-                httpTransport, JSON_FACTORY, null)
-                .setApplicationName(APPLICATION_NAME)
-                .setHttpRequestInitializer(credential).build();
+                httpTransport, JSON_FACTORY, credential)
+                .setApplicationName(APPLICATION_NAME).build();
         return gkeClient;
     }
 
-    private static JobClient buildCookJobClient(String endpoint) throws Exception {
-        JobClient client = new JobClient.Builder().setEndpoint(endpoint).build();
-        return client;
-    }
-
     public static void main(String[] args) throws Exception {
-        JobClient cookJobClient = buildCookJobClient("some endpoint");
+        CookAdminClientInterface cookAdminClient = new CookAdminClient(
+                "http://localhost:8000/sample_cook_queue.txt");
         ApiClient k8sClient = ApiClientBuilder.build("config/m8s-dev-1.yaml");
-        Container gkeClient = buildGkeClient("/client_secrets.json");
-        AutoScaler scaler = new AutoScaler(k8sClient, gkeClient, cookJobClient);
+        Container gkeClient = buildGkeClient("config/client_secret.json");
+        AutoScaler scaler = new AutoScaler(k8sClient, gkeClient, cookAdminClient);
         scaler.run();
     }
 }
