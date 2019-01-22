@@ -241,7 +241,8 @@
                job-resources (util/job-ent->resources job-ent)
                pool-name (util/job->pool-name job-ent)
                ^TaskScheduler fenzo (get pool->fenzo pool-name)]
-           (when (#{:instance.status/success :instance.status/failed} instance-status)
+           (when (and (#{:instance.status/success :instance.status/failed} instance-status)
+                      instance)
              (log/debug "Unassigning task" task-id "from" (:instance/hostname instance-ent))
              (try
                (locking fenzo
@@ -250,10 +251,12 @@
                      (call task-id (:instance/hostname instance-ent))))
                (catch Exception e
                  (log/error e "Failed to unassign task" task-id "from" (:instance/hostname instance-ent)))))
-           (when (= instance-status :instance.status/success)
+           (when (and (= instance-status :instance.status/success)
+                      instance)
              (handle-throughput-metrics job-resources instance-runtime :succeeded pool-name)
              (handle-throughput-metrics job-resources instance-runtime :completed pool-name))
-           (when (= instance-status :instance.status/failed)
+           (when (and (= instance-status :instance.status/failed)
+                      instance)
              (handle-throughput-metrics job-resources instance-runtime :failed pool-name)
              (handle-throughput-metrics job-resources instance-runtime :completed pool-name)
              (when-not previous-reason
@@ -793,13 +796,16 @@
                 mem (get-in task-request [:resources :mem])
                 image (get-in task-metadata [:container :docker :image])
                 command (get-in task-request [:job :job/command])
+;                user (get-in task-request [:job :job/user])
+                user "rodrigo"
                 instance-id (:task-id task-metadata)]
             (log/debug "launching job" {:cpus cpus
                                         :mem mem
+                                        :user user
                                         :image image
                                         :command command
                                         :instance-id instance-id})
-            (.startPod api-client cpus mem image command instance-id)))
+            (.startPod api-client user cpus mem image command instance-id)))
         (doseq [{:keys [hostname task-request] :as meta} task-metadata-seq]
           ; Iterate over the tasks we matched
           (let [user (get-in task-request [:job :job/user])]

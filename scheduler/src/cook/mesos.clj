@@ -178,20 +178,9 @@
         datomic-report-chan (async/chan (async/sliding-buffer 4096))
         mesos-heartbeat-chan (async/chan (async/buffer 4096))
         current-api-client (atom nil)
-        rebalancer-reservation-atom (atom {})
-        leader-selector (LeaderSelector.
-                          curator-framework
-                          zk-prefix
-                          ;(ThreadUtils/newThreadFactory "mesos-leader-selector")
-                          ;clojure.lang.Agent/pooledExecutor
-                          (reify LeaderSelectorListener
-                            (takeLeadership [_ client]
-                              (log/warn "Taking mesos leadership")
-                              (reset! mesos-leadership-atom true)
-                              ;; TODO: get the framework ID and try to reregister
-                              (let [normal-exit (atom true)]
-                                (try
-                                  (let [{:keys [api-client view-incubating-offers]}
+        rebalancer-reservation-atom (atom {})]
+    (reset! mesos-leadership-atom true)
+(let [{:keys [api-client view-incubating-offers]}
                                         (sched/create-datomic-scheduler
                                          {:conn mesos-datomic-conn
                                           :exit-code-syncer-state exit-code-syncer-state
@@ -219,27 +208,10 @@
                                     (cook.mesos.monitor/start-collecting-stats)
                                     (counters/inc! mesos-leader)
                                     (async/tap mesos-datomic-mult datomic-report-chan))
-                                  (catch Throwable e
-                                    (log/error e "Lost mesos leadership due to exception")
-                                    (reset! normal-exit false))
-                                  (finally
-                                    ;; Better to fail over and rely on start up code we trust then rely on rarely run code
-                                    ;; to make sure we yield leadership correctly (and fully)
-                                    ))))
-                            (stateChanged [_ client newState]
-                              ;; We will give up our leadership whenever it seems that we lost
-                              ;; ZK connection
-                              )))]
-    (.setId leader-selector (str hostname \#
-                                 (or server-port server-https-port) \#
-                                 (if server-port "http" "https") \#
-                                 (java.util.UUID/randomUUID)))
-    (.autoRequeue leader-selector)
-    (.start leader-selector)
-    (log/info "Started the mesos leader selector")
+
     {:submitter (partial submit-to-mesos mesos-datomic-conn)
      :api-client current-api-client
-     :leader-selector leader-selector
+     :leader-selector {}
      :framework-id framework-id}))
 
 (defn kill-job
