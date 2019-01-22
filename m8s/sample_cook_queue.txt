@@ -1,0 +1,34 @@
+{
+    "ondemand": [
+        {
+            "job/instance": [
+                {
+                    "instance/executor-id": "12",
+                    "instance/task-id": "23",
+                    "instance/status": "instance.status/success"
+                },
+                {
+                    "instance/executor-id": "34",
+                    "instance/task-id": "45",
+                    "instance/status": "instance.status/waiting"
+                }
+            ],
+        }
+    ],
+    "spot": [
+        {
+            "job/instance": [
+                {
+                    "instance/executor-id": "56",
+                    "instance/task-id": "67",
+                    "instance/status": "instance.status/failed"
+                },
+                {
+                    "instance/executor-id": "78",
+                    "instance/task-id": "89",
+                    "instance/status": "instance.status/waiting"
+                }
+            ],
+        }
+    ]
+}

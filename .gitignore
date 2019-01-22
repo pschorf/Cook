@@ -1,9 +1,12 @@
 *.class
+*.classpath
+*.project
 *.iml
 *.jar
 *.swo
 *.swp
 *~
+*.factorypath
 .DS_Store
 .idea/
 .kill_lein
@@ -22,6 +25,9 @@
 /target
 gclog*
 jobclient/src/cfg
+jobclient/.settings
+m8s/.settings
+client_secrets.json
 pom.xml
 pom.xml.asc
 scheduler/checkouts
