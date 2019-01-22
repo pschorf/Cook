@@ -12,4 +12,5 @@ public interface PodEventNotifier {
     void handlePodKilled(String podName, String message, DateTime firstTimestamp, DateTime lastTimestamp);
     void handlePodFailed(String podName, String message, DateTime firstTimestamp, DateTime lastTimestamp);
     void handlePodFailedScheduling(String podName, String message, DateTime firstTimestamp, DateTime lastTimestamp);
+    void handlePodSucceeded(String podName, String message, DateTime firstTimestamp, DateTime lastTimestamp);
 }

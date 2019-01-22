@@ -148,10 +148,10 @@ public class M8s {
         return available;
     }
 
-    public void startPod(String username, double cpus, int memoryMb, String image, String command, String uuid) throws ApiException {
+    public void startPod(String username, double cpus, int memoryMb, String image, String command, String nodeName, String uuid) throws ApiException {
         String namespace = "default";
         Map<String, Quantity> requests = new HashMap<>();
-        requests.put("cpu", Quantity.fromString(Double.toString(cpus)));
+        requests.put("cpu", Quantity.fromString(Double.toString(cpus * 1000) + "m"));
         requests.put("memory", Quantity.fromString(memoryMb + "Mi"));
 
         V1Pod pod = new V1PodBuilder()
@@ -162,6 +162,7 @@ public class M8s {
                         .build())
                 .withSpec(new V1PodSpecBuilder()
                         .withRestartPolicy("Never")
+                        .withNodeName(nodeName)
                         .withVolumes(new V1VolumeBuilder()
                                 .withName("kerberosticket")
                                 .withSecret(new V1SecretVolumeSourceBuilder()
@@ -192,7 +193,7 @@ public class M8s {
     }
 
     public void pollPodEvents(PodEventNotifier notifier) throws ApiException {
-        Call call = this.coreV1Api.listEventForAllNamespacesCall(null, null, null, null, null, null, null, null, true, null, null);
+        Call call = this.coreV1Api.listEventForAllNamespacesCall(null, null, true, null, null, null, null, null, true, null, null);
         Watch<V1Event> eventsWatch = Watch.createWatch(this.apiClient,
                 call,
                 new TypeToken<Watch.Response<V1Event>>() {}.getType());

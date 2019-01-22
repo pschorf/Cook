@@ -22,7 +22,6 @@ public class Application {
         M8s m8 = new M8s(apiClient);
 
         // Start polling pod events, atm we only care about pods started and killed.
-
         m8.pollPodEvents(new PodEventNotifier() {
             public void handlePodStarted(String podName, String message, DateTime firstTimestamp, DateTime lastTimestamp) {
                 System.out.println(String.format("Pod %s started with message [%s] at (first) %s (last) %s",
@@ -48,12 +47,18 @@ public class Application {
                 System.out.println(String.format("Pod %s failed scheduling with message [%s] at (first) %s (last) %s",
                         podName, message, firstTimestamp, lastTimestamp));
             }
+
+            @Override
+            public void handlePodSucceeded(String podName, String message, DateTime firstTimestamp, DateTime lastTimestamp) {
+                System.out.println(String.format("Pod %s succeeded with message [%s] at (first) %s (last) %s",
+                        podName, message, firstTimestamp, lastTimestamp));
+            }
         });
 
         // Create dummy container
         String uuid = UUID.randomUUID().toString();
         System.out.println("Starting pod with uuid " + uuid);
-        //m8.startPod("rodrigo", 0.5, 128, "nginx:latest", "echo test", uuid);
+        m8.startPod("rodrigo", 0.5, 128, "nginx:latest", "echo test", "gke-m8s-dev-1-default-pool-2daaf601-n4lb", uuid);
 
         //m8.populateOrRefreshKerberosTicket("rodrigo");
 

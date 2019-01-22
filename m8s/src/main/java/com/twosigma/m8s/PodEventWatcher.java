@@ -32,6 +32,7 @@ public class PodEventWatcher implements Runnable {
                     String message = event.getMessage();
                     DateTime firstTimestamp = event.getFirstTimestamp();
                     DateTime lastTimestamp = event.getLastTimestamp();
+
                     if (reason.equals("Killing")) {
                         this.notifier.handlePodKilled(podName, message, firstTimestamp, lastTimestamp);
                     } else if (reason.equals("Started")) {
@@ -40,7 +41,14 @@ public class PodEventWatcher implements Runnable {
                         this.notifier.handlePodFailed(podName, message, firstTimestamp, lastTimestamp);
                     } else if (reason.equals("FailedScheduling")) {
                         this.notifier.handlePodFailedScheduling(podName, message, firstTimestamp, lastTimestamp);
+                    } else if (reason.equals("Succeeded")) {
+                        this.notifier.handlePodSucceeded(podName, message, firstTimestamp, lastTimestamp);
+                    } else {
+                        System.out.println("Don't know how to handle " + reason);
                     }
+                } else {
+                    System.out.println("not pod object... " + event.getReason());
+                    System.out.println(event);
                 }
             }
             try {
