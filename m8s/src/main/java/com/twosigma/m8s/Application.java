@@ -22,7 +22,7 @@ public class Application {
         M8s m8 = new M8s(apiClient);
 
         // Start polling pod events, atm we only care about pods started and killed.
-        m8.pollPodEvents(new PodEventNotifier() {
+        m8.pollPodEvents("default", new PodEventNotifier() {
             public void handlePodStarted(String podName, String message, DateTime firstTimestamp, DateTime lastTimestamp) {
                 System.out.println(String.format("Pod %s started with message [%s] at (first) %s (last) %s",
                         podName, message, firstTimestamp, lastTimestamp));
@@ -63,9 +63,10 @@ public class Application {
         //m8.populateOrRefreshKerberosTicket("rodrigo");
 
         // Pull available resources
+        /*
         for (Map.Entry<String, Map<String, Quantity>> stringMapEntry : m8.getAvailableResources().entrySet()) {
             System.out.println(stringMapEntry);
-        }
+        }*/
     }
 
 }

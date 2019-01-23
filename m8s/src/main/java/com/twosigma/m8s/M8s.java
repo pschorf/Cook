@@ -192,12 +192,33 @@ public class M8s {
         this.coreV1Api.createNamespacedPod(namespace, pod, null);
     }
 
-    public void pollPodEvents(PodEventNotifier notifier) throws ApiException {
-        Call call = this.coreV1Api.listEventForAllNamespacesCall(null, null, true, null, null, null, null, null, true, null, null);
-        Watch<V1Event> eventsWatch = Watch.createWatch(this.apiClient,
-                call,
-                new TypeToken<Watch.Response<V1Event>>() {}.getType());
-        executorService.execute(new PodEventWatcher(eventsWatch, notifier));
+    private Watch<V1Event> createEventsWatch(String namespace) throws ApiException {
+        V1EventList previousEvents = this.coreV1Api.listNamespacedEvent(namespace, null, null, null, null, null, null, null, null, null);
+        Long maxResourceVersion = Long.MIN_VALUE;
+        for (V1Event event : previousEvents.getItems()) {
+            Long resourceVersion = Long.valueOf(event.getMetadata().getResourceVersion());
+            maxResourceVersion = Math.max(maxResourceVersion, resourceVersion);
+        }
+        Call call = this.coreV1Api.listNamespacedEventCall(namespace, null, null, null, null, null, null, maxResourceVersion.toString(), null, true, null, null);
+        return Watch.createWatch(this.apiClient, call, new TypeToken<Watch.Response<V1Event>>() {}.getType());
+    }
+
+    private Watch<V1Pod> createPodsWatch(String namespace) throws ApiException {
+        V1PodList allPods = this.coreV1Api.listNamespacedPod(namespace, null, null, null, null, null, null, null, null, null);
+        Long maxResourceVersion = Long.MIN_VALUE;
+        for (V1Pod pod : allPods.getItems()) {
+            Long resourceVersion = Long.valueOf(pod.getMetadata().getResourceVersion());
+            maxResourceVersion = Math.max(maxResourceVersion, resourceVersion);
+        }
+        Call call = this.coreV1Api.listNamespacedPodCall(namespace, null, null, null, null, null, null, maxResourceVersion.toString(), null, Boolean.TRUE, null, null);
+        return Watch.createWatch(this.apiClient, call, new TypeToken<Watch.Response<V1Pod>>() {}.getType());
+    }
+
+    public void pollPodEvents(String namespace, PodEventNotifier notifier) throws ApiException {
+        Watch<V1Pod> podsWatch = this.createPodsWatch(namespace);
+        Watch<V1Event> eventsWatch = this.createEventsWatch(namespace);
+        executorService.execute(new EventsWatcher(eventsWatch, notifier));
+        executorService.execute(new PodsWatcher(podsWatch, notifier));
     }
 
 }
