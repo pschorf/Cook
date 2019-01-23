@@ -27,7 +27,7 @@ gclog*
 jobclient/src/cfg
 jobclient/.settings
 m8s/.settings
-client_secrets.json
+m8s/config/client_secrets.json
 pom.xml
 pom.xml.asc
 scheduler/checkouts
