@@ -796,6 +796,7 @@
                 mem (get-in task-request [:resources :mem])
                 image (get-in task-metadata [:container :docker :image])
                 command (get-in task-request [:job :job/command])
+                hostname (:hostname task-metadata)
 ;                user (get-in task-request [:job :job/user])
                 user "rodrigo"
                 instance-id (:task-id task-metadata)]
@@ -804,8 +805,9 @@
                                         :user user
                                         :image image
                                         :command command
+                                        :node hostname
                                         :instance-id instance-id})
-            (.startPod api-client user cpus mem image command instance-id)))
+            (.startPod api-client user cpus mem image command hostname instance-id)))
         (doseq [{:keys [hostname task-request] :as meta} task-metadata-seq]
           ; Iterate over the tasks we matched
           (let [user (get-in task-request [:job :job/user])]
@@ -1491,7 +1493,9 @@
   (handlePodStarted [_ name _ _ _]
     (handle-status-update conn pool->fenzo {:name name
                                             :state :task-running}))
-  (handlePodFinished [_ name _ _ _]
+  (handlePodFinished [_ name message _ _]
+    (log/info "Pod finished event: " {:name name
+                                      :message message})
     (handle-status-update conn pool->fenzo {:name name
                                             :state :task-finished}))
 
