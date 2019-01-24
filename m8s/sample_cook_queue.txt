@@ -1,34 +1,32 @@
 {
     "ondemand": [
         {
-            "job/instance": [
+            "job/resource": [
                 {
-                    "instance/executor-id": "12",
-                    "instance/task-id": "23",
-                    "instance/status": "instance.status/success"
+                    "resource/type": "resource.type/cpus",
+                    "resource/amount": 8
                 },
                 {
-                    "instance/executor-id": "34",
-                    "instance/task-id": "45",
-                    "instance/status": "instance.status/waiting"
+                    "resource/type": "resource.type/mem",
+                    "resource/amount": 44768
                 }
             ],
+            "job/uuid": "12"
         }
     ],
     "spot": [
         {
-            "job/instance": [
+            "job/resource": [
                 {
-                    "instance/executor-id": "56",
-                    "instance/task-id": "67",
-                    "instance/status": "instance.status/failed"
+                    "resource/type": "resource.type/mem",
+                    "resource/amount": 30720
                 },
                 {
-                    "instance/executor-id": "78",
-                    "instance/task-id": "89",
-                    "instance/status": "instance.status/waiting"
+                    "resource/type": "resource.type/cpus",
+                    "resource/amount": 8
                 }
             ],
+            "job/uuid": "34"
         }
     ]
 }

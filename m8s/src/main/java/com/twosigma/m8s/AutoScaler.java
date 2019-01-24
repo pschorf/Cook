@@ -3,6 +3,8 @@ package com.twosigma.m8s;
 import com.google.api.client.googleapis.auth.oauth2.GoogleCredential;
 import com.google.api.services.compute.Compute;
 import com.google.api.services.compute.model.InstanceGroupManager;
+import com.google.api.services.compute.model.InstanceTemplate;
+import com.google.api.services.compute.model.MachineType;
 import io.kubernetes.client.ApiClient;
 
 import com.google.api.services.container.model.ListNodePoolsResponse;
@@ -22,7 +24,6 @@ import com.google.api.services.container.Container;
 import com.google.api.services.container.ContainerScopes;
 
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.*;
@@ -32,12 +33,13 @@ import java.util.regex.Pattern;
 public class AutoScaler {
     private static final String APPLICATION_NAME = "AutoScaler";
     private static final long POLL_PERIOD_SECONDS = 10;
+    private static final long MIN_TIME_BETWEEN_SCALE_UP_SECONDS = 60;
 
     private final ApiClient k8sClient;
     private final Container gkeClient;
     private final Compute gceClient;
     private final CookAdminClientInterface cookAdminClient;
-    private Map<String, Integer> waitingTaskIdToOccurences = new HashMap<>();
+    private long lastScaleUpTimeMilliseconds;
 
     private static HttpTransport httpTransport;
     private static DataStoreFactory dataStoreFactory;
@@ -57,6 +59,15 @@ public class AutoScaler {
      */
     private static final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
 
+    private class Resource {
+        public int numCpu;
+        public int numMemMB;
+        public Resource() {
+            this.numCpu = 0;
+            this.numMemMB = 0;
+        }
+    }
+
     public AutoScaler(
             ApiClient k8sClient,
             Container gkeClient,
@@ -66,54 +77,66 @@ public class AutoScaler {
         this.gkeClient = gkeClient;
         this.cookAdminClient = cookAdminClient;
         this.gceClient = gceClient;
+        this.lastScaleUpTimeMilliseconds = 0;
     }
 
     public void run() throws InterruptedException {
         while (true) {
-            System.out.println("Enter autoscaler main poll loop");
-
-            try {
-                if (this.cookQueueBusy()) {
-                    // Only scale up 1 VM at a time for now. No scale down.
-                    this.scaleUpNodePool();
-                }
-            } catch (Exception e) {
-                System.out.println("Fail to query cook queue or scale up node");
-            }
-
             System.out.println("Sleeping for " + POLL_PERIOD_SECONDS + " seconds");
             Thread.currentThread().sleep(POLL_PERIOD_SECONDS * 1000);
+            System.out.println("Enter autoscaler main poll loop");
+
+            if (this.lastScaleUpTimeMilliseconds + MIN_TIME_BETWEEN_SCALE_UP_SECONDS * 1000
+                    > System.currentTimeMillis()) {
+                System.out.println("Last scale up too recent, skip loop");
+                continue;
+            }
+
+            Resource resourceToBeScaledUp = null;
+            try {
+                resourceToBeScaledUp = this.cookQueueBusy();
+            } catch (Exception e) {
+                e.printStackTrace();
+                System.out.println("Fail to query cook queue");
+                continue;
+            }
+
+            if (resourceToBeScaledUp == null ||
+                    (resourceToBeScaledUp.numCpu == 0 && resourceToBeScaledUp.numMemMB == 0)) {
+                System.out.println("No scale up needed");
+                continue;
+            }
+
+            try {
+                System.out.println("Need to scale up " + resourceToBeScaledUp.numCpu + " cpus "
+                        + resourceToBeScaledUp.numMemMB + " mem MBs");
+                if (this.scaleUpNodePool(resourceToBeScaledUp)) {
+                    this.lastScaleUpTimeMilliseconds = System.currentTimeMillis();
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+                System.out.println("Fail to scale up node");
+                continue;
+            }
         }
     }
 
-    private boolean cookQueueBusy() throws Exception {
-        List<CookJobInstance> instances = this.cookAdminClient.getCookQueue();
-        Map<String, Integer> newWaitingTaskIdToOccurences = new HashMap<>();
-        for (CookJobInstance instance : instances) {
-            if (instance.getStatus().equals("instance.status/waiting")) {
-                newWaitingTaskIdToOccurences.put(instance.getTaskId(), 1);
-            }
+    private Resource cookQueueBusy() throws Exception {
+        List<CookJob> jobs = this.cookAdminClient.getCookQueue();
+        if (jobs.isEmpty()) {
+            return null;
         }
 
-        for (String taskId : this.waitingTaskIdToOccurences.keySet()) {
-            if (newWaitingTaskIdToOccurences.containsKey(taskId)) {
-                int newValue = this.waitingTaskIdToOccurences.get(taskId) + newWaitingTaskIdToOccurences.get(taskId);
-                newWaitingTaskIdToOccurences.put(taskId, newValue);
-                // If an instance is in waiting state twice in a row, consider the queue busy and needs to be scaled up
-                if (newValue >= 5) {
-                    System.out.println("Task " + taskId + " is busy for " + newValue + " times");
-                    this.waitingTaskIdToOccurences = new HashMap<>();
-                    return true;
-                }
-            }
+        Resource resourceToBeScaledUp = new Resource();
+        for (CookJob job : jobs) {
+            resourceToBeScaledUp.numCpu += job.getNumCpu();
+            resourceToBeScaledUp.numMemMB += job.getNumMemMB();
         }
-
-        this.waitingTaskIdToOccurences = newWaitingTaskIdToOccurences;
-        return false;
+        return resourceToBeScaledUp;
     }
 
     // Super simple, get current node pool size and increment by 1
-    private void scaleUpNodePool() throws IOException {
+    private boolean scaleUpNodePool(Resource resourceToBeScaledUp) throws IOException {
         String parent = String.format("projects/%s/locations/%s/clusters/%s", projectId, location, cluster);
         // API reference: https://cloud.google.com/kubernetes-engine/docs/reference/rest/v1/projects.locations.clusters.nodePools/list
         Container.Projects.Locations.Clusters.NodePools.List listNodePoolsRequest =
@@ -122,41 +145,65 @@ public class AutoScaler {
         List<NodePool> pools = listNodePoolsResponse.getNodePools();
 
         // TODO: We only consider 1 node pool for now
-        NodePool defaultPool = pools.get(0);
-        String machineGroupUrl = defaultPool.getInstanceGroupUrls().get(0);
+        final NodePool defaultPool = pools.get(0);
 
         // Machine group url is like:
         // https://www.googleapis.com/compute/v1/projects/rodrigo-dev/zones/us-central1-a/instanceGroupManagers/gke-m8s-dev-1-default-pool-2daaf601-grp
+        final String instanceGroupUrl = defaultPool.getInstanceGroupUrls().get(0);
         Pattern p = Pattern.compile(
                 "https://www.googleapis.com/compute/v1/projects/([^/]+)/zones/([^/]+)/instanceGroupManagers/([^/]+)");
-        Matcher m = p.matcher(machineGroupUrl);
+        Matcher m = p.matcher(instanceGroupUrl);
         if (!m.find()) {
-            System.out.println("Machine group of pool " + defaultPool.getName() +
-                    " doesn't conform to the right format (" + machineGroupUrl + ")");
-            return;
+            System.out.println("Instance group of pool " + defaultPool.getName() +
+                    " doesn't conform to the right format (" + instanceGroupUrl + ")");
+            return false;
         }
 
-        final String project = m.group(1);
-        final String zone = m.group(2);
+        final String instanceGroupProject = m.group(1);
+        final String instanceGroupZone = m.group(2);
         final String instanceGroupName = m.group(3);
-        Compute.InstanceGroupManagers.Get request = this.gceClient.instanceGroupManagers().get(
-                project, zone, instanceGroupName);
-        InstanceGroupManager instanceGroup = request.execute();
-        int currentTargetSize = instanceGroup.getTargetSize();
-        if (instanceGroup.getCurrentActions().getNone() < currentTargetSize) {
-            System.out.println("Instance group " + machineGroupUrl + " is still reconciling. Waiting before scaling.");
+        InstanceGroupManager instanceGroupManager = this.gceClient.instanceGroupManagers().get(
+                instanceGroupProject, instanceGroupZone, instanceGroupName).execute();
+        final int currentTargetSize = instanceGroupManager.getTargetSize();
+
+        // Instance template is like
+        // https://www.googleapis.com/compute/v1/projects/rodrigo-dev/global/instanceTemplates/gke-m8s-dev-1-default-pool-ac0517f6"
+        p = Pattern.compile("https://www.googleapis.com/compute/v1/projects/([^/]+)/global/instanceTemplates/([^/]+)");
+        m = p.matcher(instanceGroupManager.getInstanceTemplate());
+        if (!m.find()) {
+            System.out.println("Instance template of instance group " + instanceGroupManager.getSelfLink() +
+                    " doesn't conform to the right format (" + instanceGroupManager.getInstanceTemplate() + ")");
+            return false;
         }
+        final String instanceTemplateProject = m.group(1);
+        final String instanceTemplateName = m.group(2);
+        final InstanceTemplate instanceTemplate = this.gceClient.instanceTemplates().get(
+                instanceTemplateProject, instanceTemplateName).execute();
+
+        // Machine type is like n1-standard-1
+        final MachineType machineType = this.gceClient.machineTypes().get(
+                instanceGroupProject,
+                instanceGroupZone,
+                instanceTemplate.getProperties().getMachineType()).execute();
+
+        final int numVmToBeScaledUp = Math.max(
+            resourceToBeScaledUp.numCpu / machineType.getGuestCpus() + 1,
+            resourceToBeScaledUp.numMemMB / machineType.getMemoryMb() + 1
+        );
 
         // API reference: https://cloud.google.com/kubernetes-engine/docs/reference/rest/v1/projects.locations.clusters.nodePools/setSize
-        String poolName = String.format("projects/%s/locations/%s/clusters/%s/nodePools/%s",
+        final String poolName = String.format("projects/%s/locations/%s/clusters/%s/nodePools/%s",
                 projectId, location, cluster, defaultPool.getName());
-        int newTargetSize = currentTargetSize + 1;
+        final int newTargetSize = currentTargetSize + numVmToBeScaledUp;
         System.out.println("Resize node pool " + poolName + " from " + currentTargetSize + " to " + newTargetSize +
-                " (instance group " + machineGroupUrl + ")");
+                " (Machine type " + machineType.getGuestCpus() + "cpus, " + machineType.getMemoryMb() + "mem MBs)");
         SetNodePoolSizeRequest setNodePoolSizeRequest = new SetNodePoolSizeRequest().setNodeCount(newTargetSize);
         Container.Projects.Locations.Clusters.NodePools.SetSize setSizeRequest =
                 this.gkeClient.projects().locations().clusters().nodePools().setSize(poolName, setNodePoolSizeRequest);
-        //setSizeRequest.execute();
+
+        // This resize request will fail if the previous resize hasn't finished reconciliation.
+        setSizeRequest.execute();
+        return true;
     }
 
     /**

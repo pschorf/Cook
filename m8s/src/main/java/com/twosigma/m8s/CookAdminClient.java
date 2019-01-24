@@ -14,7 +14,7 @@ public class CookAdminClient implements CookAdminClientInterface {
         this.endpoint = endpoint;
     }
 
-    public List<CookJobInstance> getCookQueue() throws Exception {
+    public List<CookJob> getCookQueue() throws Exception {
         HttpURLConnection connection = null;
 
         try {
@@ -36,7 +36,7 @@ public class CookAdminClient implements CookAdminClientInterface {
                 response.append('\r');
             }
             rd.close();
-            return CookJobInstance.parseCookQueue(response.toString());
+            return CookJob.parseCookQueue(response.toString());
         } catch (Exception e) {
             e.printStackTrace();
             throw e;
