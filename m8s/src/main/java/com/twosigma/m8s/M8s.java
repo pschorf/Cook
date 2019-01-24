@@ -197,7 +197,6 @@ public class M8s {
         Long maxResourceVersion = Long.MIN_VALUE;
         for (V1Event event : previousEvents.getItems()) {
             Long resourceVersion = Long.valueOf(event.getMetadata().getResourceVersion());
-            System.out.println(resourceVersion);
             maxResourceVersion = Math.max(maxResourceVersion, resourceVersion);
         }
         String strResourceVersion = null;

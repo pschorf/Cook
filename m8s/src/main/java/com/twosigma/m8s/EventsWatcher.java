@@ -45,8 +45,6 @@ public class EventsWatcher implements Runnable {
                     this.notifier.handlePodFailed(podName, message, firstTimestamp, lastTimestamp);
                 } else if (reason.equals("FailedScheduling")) {
                     this.notifier.handlePodFailedScheduling(podName, message, firstTimestamp, lastTimestamp);
-                } else if (reason.equals("Succeeded")) {
-                    this.notifier.handlePodSucceeded(podName, message, firstTimestamp, lastTimestamp);
                 } else {
                     System.out.println("Don't know how to handle " + reason);
                 }

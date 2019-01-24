@@ -30,6 +30,8 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static com.google.common.base.Preconditions.checkNotNull;
+
 public class AutoScaler {
     private static final String APPLICATION_NAME = "AutoScaler";
     private static final long POLL_PERIOD_SECONDS = 10;
@@ -237,7 +239,6 @@ public class AutoScaler {
      */
     private static Container buildGkeClient(String clientSecretFilename) throws Exception {
         GoogleCredential credential = AutoScaler.getGoogleCredential(clientSecretFilename);
-
         // Create compute engine object for listing instances
         httpTransport = GoogleNetHttpTransport.newTrustedTransport();
         Container gkeClient = new Container.Builder(
@@ -262,11 +263,18 @@ public class AutoScaler {
     }
 
     public static void main(String[] args) throws Exception {
-        CookAdminClientInterface cookAdminClient = new CookAdminClient(
-                "http://localhost:8000/sample_cook_queue.txt");
-        ApiClient k8sClient = ApiClientBuilder.build("config/m8s-dev-1.yaml");
-        Container gkeClient = buildGkeClient("config/client_secrets.json");
-        Compute gceClient = buildGceClient("config/client_secrets.json");
+        String cookUrl = System.getenv("COOK_URL");
+        checkNotNull(cookUrl, "COOK_URL environment variable cannot be undefined");
+
+        String k8sConnConfigPath = System.getenv("K8S_CONN_CONFIG_PATH");
+        checkNotNull(k8sConnConfigPath, "K8S_CONN_CONFIG_PATH environment variable cannot be undefined");
+
+        String clientSecretPath = System.getenv("CLIENT_SECRET_PATH");
+
+        CookAdminClientInterface cookAdminClient = new CookAdminClient(cookUrl);
+        ApiClient k8sClient = ApiClientBuilder.build(k8sConnConfigPath);
+        Container gkeClient = buildGkeClient(clientSecretPath);
+        Compute gceClient = buildGceClient(clientSecretPath);
         AutoScaler scaler = new AutoScaler(k8sClient, gkeClient, gceClient, cookAdminClient);
         scaler.run();
     }
