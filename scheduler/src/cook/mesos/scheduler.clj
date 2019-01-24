@@ -1517,7 +1517,7 @@
         message-handlers {:handle-exit-code handle-exit-code
                           :handle-progress-message handle-progress-message}
         pod-event-notifier (CookPodEventNotifier. conn pool->fenzo)]
-    (.pollPodEvents api-client pod-event-notifier)))
+    (.pollPodEvents api-client "default" pod-event-notifier)))
 
 (defn create-datomic-scheduler
   [{:keys [conn exit-code-syncer-state fenzo-fitness-calculator fenzo-floor-iterations-before-reset
