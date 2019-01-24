@@ -21,6 +21,15 @@ public class PodsWatcher implements Runnable {
     public void run() {
         while (this.podsWatch.hasNext()) {
             V1Pod pod = this.podsWatch.next().object;
+            if (pod == null) {
+                continue;
+            }
+            if (pod.getMetadata() == null) {
+                continue;
+            }
+            if (pod.getStatus() == null) {
+                continue;
+            }
             String name = pod.getMetadata().getName();
             String phase = pod.getStatus().getPhase();
             if (phase.equals("Succeeded")) {

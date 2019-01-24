@@ -21,6 +21,13 @@ public class Application {
         ApiClient apiClient = ApiClientBuilder.build("config/m8s-dev-1.yaml");
         M8s m8 = new M8s(apiClient);
 
+        m8.pollNodeEvents(new NodeEventNotifier() {
+            @Override
+            public void handleNodeUp(String nodeName) {
+                System.out.println("Node with name " + nodeName + " came up");
+            }
+        });
+
         // Start polling pod events, atm we only care about pods started and killed.
         m8.pollPodEvents("default", new PodEventNotifier() {
             public void handlePodStarted(String podName, String message, DateTime firstTimestamp, DateTime lastTimestamp) {
