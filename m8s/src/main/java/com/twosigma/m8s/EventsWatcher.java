@@ -49,6 +49,8 @@ public class EventsWatcher implements Runnable {
                     this.notifier.handlePodFailed(podName, message, firstTimestamp, lastTimestamp);
                 } else if (reason.equals("FailedScheduling")) {
                     this.notifier.handlePodFailedScheduling(podName, message, firstTimestamp, lastTimestamp);
+                } else if (reason.equals("OutOfcpu")) {
+                    this.notifier.handlePodFailedScheduling(podName, message, firstTimestamp, lastTimestamp);
                 } else {
                     System.out.println("Don't know how to handle " + reason);
                 }
