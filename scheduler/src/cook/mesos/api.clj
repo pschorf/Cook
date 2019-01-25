@@ -2637,6 +2637,14 @@
                                     (tf/unparse iso-8601-format update-time)))
                                 uuid->datasets)))}))
 
+(defn resource-handler
+  []
+  (base-cook-handler
+   {:allowed-methods [:get]
+    :handle-ok (fn [_] (let [resources @util/resource-availability-cache]
+                         (log/info "Returning resources" resources)
+                         resources))}))
+
 (defn data-local-cost-handler
   "Handler which returns the data locality costs for a given job"
   [conn]
@@ -2978,6 +2986,14 @@
          :responses {200 {:schema DataLocalUpdateTimeResponse}}
          :get {:summary "Returns summary information on the current data locality status"
                :handler (data-local-update-time-handler conn)}}))
+
+       (c-api/context
+        "/resources" []
+        (c-api/resource
+         {:produces ["application/json"]
+          :responses {200 {:schema {s/Str {s/Str s/Num}}}}
+          :get {:summary "Returns resources"
+                :handler (resource-handler)}}))
 
       (ANY "/queue" []
         (waiting-jobs mesos-pending-jobs-fn is-authorized-fn mesos-leadership-atom leader-selector))

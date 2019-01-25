@@ -55,8 +55,9 @@
                              VMTaskFitnessCalculator VirtualMachineLease VirtualMachineLease$Range
                              VirtualMachineCurrentState]
           [io.kubernetes.client ApiClient]
-          [com.twosigma.m8s M8s ApiClientBuilder PodEventNotifier]
+          [com.twosigma.m8s M8s ApiClientBuilder PodEventNotifier NodeEventNotifier]
           [com.netflix.fenzo.functions Action1 Func1]))
+
 
 (defn now
   []
@@ -244,6 +245,10 @@
            (when (and (#{:instance.status/success :instance.status/failed} instance-status)
                       instance)
              (log/debug "Unassigning task" task-id "from" (:instance/hostname instance-ent))
+             (swap! util/resource-availability-cache (fn [cache]
+                                                       (let [node (:instance/hostname instance-ent)]
+                                                         (update-in cache [node "memory"] #(+ % (:mem job-resources)))
+                                                         (update-in cache [node "cpu"] #(+ % (:cpus job-resources))))))
              (try
                (locking fenzo
                  (.. fenzo
@@ -406,21 +411,14 @@
 ;;; API for matcher
 ;;; ===========================================================================
 
-(defn double-resource-value [map resource-name]
-  (when (contains? map resource-name)
-    (-> map
-        (get resource-name)
-        .getNumber
-        .doubleValue)))
-
 (defrecord M8sLeaseAdapter [id time node resource-map]
   VirtualMachineLease
-  (cpuCores [_] (double-resource-value resource-map "cpu"))
+  (cpuCores [_] (get resource-map "cpu"))
   (diskMB [_] 0.0)
-  (getScalarValue [_ name] (or (double-resource-value resource-map name)
+  (getScalarValue [_ name] (or (get resource-map name)
                                0.0))
   (getScalarValues [_] (-> (pc/map-from-keys (fn [resource-name]
-                                               (double-resource-value resource-map resource-name))
+                                               (get resource-map resource-name))
                                              (keys resource-map))
                            (clojure.set/rename-keys {"cpu" "cpus", "memory" "mem"})))
   (getAttributeMap [_] {"HOSTNAME" node})
@@ -429,7 +427,7 @@
   (getOfferedTime [_] time)
   (getVMID [_] node)
   (hostname [_] node)
-  (memoryMB [_] (/ (double-resource-value resource-map "memory") (* 1024 1024)))
+  (memoryMB [_] (/ (get resource-map "memory") (* 1024 1024)))
   (networkMbps [_] 0.0)
   (portRanges [_] [])
 
@@ -585,6 +583,7 @@
         ;; task assigner can not be called at the same time.
         ;; task assigner may be called when reconciling
         result (locking fenzo
+                 (.expireAllLeases fenzo)
                  (.scheduleOnce fenzo requests leases))
         failure-results (.. result getFailures values)
         assignments (.. result getResultMap values)]
@@ -749,6 +748,18 @@
       :instance/status :instance.status/unknown
       :instance/task-id task-id}]))
 
+(defn consume-resources [{:keys [task-request] :as task-metadata}]
+  (let [node (:hostname task-metadata)
+        cpus (get-in task-request [:resources :cpus])
+        mem (get-in task-request [:resources :mem])]
+    (log/info "Updating resource cache:" {:node node
+                                          :cpus cpus
+                                          :mem mem})
+    (swap! util/resource-availability-cache (fn [cached-resources]
+                                              (-> cached-resources
+                                                  (update-in [node "memory"] #(- % mem))
+                                                  (update-in [node "cpu"] #(- % cpus)))))))
+
 (defn launch-matched-tasks!
   "Updates the state of matched tasks in the database and then launches them."
   [matches conn db api-client fenzo framework-id mesos-run-as-user pool-name]
@@ -807,6 +818,7 @@
                                         :command command
                                         :node hostname
                                         :instance-id instance-id})
+            (consume-resources task-metadata)
             (.startPod api-client user cpus mem image command hostname instance-id)))
         (doseq [{:keys [hostname task-request] :as meta} task-metadata-seq]
           ; Iterate over the tasks we matched
@@ -904,7 +916,7 @@
 (counters/defcounter [cook-mesos scheduler offer-chan-depth])
 
 (defn get-m8s-offers [api-client]
-  (let [available-resources (.getAvailableResources api-client)]
+  (let [available-resources @util/resource-availability-cache]
     (map (fn [[node resource-map]]
            (M8sLeaseAdapter. (str (java.util.UUID/randomUUID)) (System/currentTimeMillis) node resource-map))
          available-resources)))
@@ -1493,6 +1505,11 @@
   (handlePodStarted [_ name _ _ _]
     (handle-status-update conn pool->fenzo {:name name
                                             :state :task-running}))
+  (handlePodSucceeded [_ name message _ _]
+    (log/info "Pod succeeded event: " {:name name
+                                      :message message})
+    (handle-status-update conn pool->fenzo {:name name
+                                            :state :task-finished}))
   (handlePodFinished [_ name message _ _]
     (log/info "Pod finished event: " {:name name
                                       :message message})
@@ -1509,6 +1526,15 @@
     (handle-status-update conn pool->fenzo {:name name
                                             :state :task-failed})))
 
+(defrecord CookNodeEventNotifier [api-client]
+  NodeEventNotifier
+  (handleNodeUp [this nodename]
+                (let [resources (.getAvailableResources api-client)]
+                  (reset! util/resource-availability-cache (pc/map-vals (fn [type->quantity]
+                                                                          (pc/map-vals (fn [quantity] (-> quantity .getNumber .doubleValue))
+                                                                                       type->quantity))
+                                                                        resources)))))
+
 (defn create-mesos-scheduler
   "Creates the mesos scheduler which processes status updates asynchronously but in order of receipt."
   [configured-framework-id gpu-enabled? conn heartbeat-ch pool->fenzo pool->offers-chan match-trigger-chan
@@ -1517,7 +1543,13 @@
         message-handlers {:handle-exit-code handle-exit-code
                           :handle-progress-message handle-progress-message}
         pod-event-notifier (CookPodEventNotifier. conn pool->fenzo)]
-    (.pollPodEvents api-client "default" pod-event-notifier)))
+    (let [resources (.getAvailableResources api-client)]
+      (reset! util/resource-availability-cache (pc/map-vals (fn [type->quantity]
+                                                              (pc/map-vals (fn [quantity] (-> quantity .getNumber .doubleValue))
+                                                                           type->quantity))
+                                                            resources)))
+    (.pollPodEvents api-client "default" pod-event-notifier)
+    (.pollNodeEvents api-client (CookNodeEventNotifier. api-client))))
 
 (defn create-datomic-scheduler
   [{:keys [conn exit-code-syncer-state fenzo-fitness-calculator fenzo-floor-iterations-before-reset

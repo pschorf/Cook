@@ -33,6 +33,8 @@
     [java.util Date]
     [org.joda.time DateTime ReadablePeriod]))
 
+(def resource-availability-cache (atom {}))
+
 (defn new-cache []
   "Build a new cache"
   (-> (CacheBuilder/newBuilder)
