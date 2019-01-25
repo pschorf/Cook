@@ -70,8 +70,13 @@ public class Application {
         //m8.populateOrRefreshKerberosTicket("rodrigo");
 
         // Pull available resources
-        /*
-        for (Map.Entry<String, Map<String, Quantity>> stringMapEntry : m8.getAvailableResources().entrySet()) {
+        // Each map entry is like
+        // ephemeral-storage=Quantity{number=47093746742, format=DECIMAL_SI},
+        // memory=Quantity{number=2242727936, format=BINARY_SI},
+        // cpu=Quantity{number=0.740, format=DECIMAL_SI},
+        // hugepages-2Mi=Quantity{number=0, format=DECIMAL_SI},
+        // pods=Quantity{number=110, format=DECIMAL_SI}}
+        /*for (Map.Entry<String, Map<String, Quantity>> stringMapEntry : m8.getAvailableResources().entrySet()) {
             System.out.println(stringMapEntry);
         }*/
     }

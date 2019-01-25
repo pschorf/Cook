@@ -106,6 +106,10 @@ public class M8s {
         return used;
     }
 
+    // Reference for allocatable
+    // https://github.com/kubernetes/community/blob/master/contributors/design-proposals/node/node-allocatable.md
+    // Allocable != Capacity - Used
+    // Allocable == Capacity - (System Reserved + Kube Reserved)
     private Map<String, Map<String, Quantity>> collectAllocatableResources() throws ApiException {
         V1NodeList nodes = this.coreV1Api.listNode(null, null, null, null, null, null, null, null, false);
         Map<String, Map<String, Quantity>> allocatable = new HashMap<>();

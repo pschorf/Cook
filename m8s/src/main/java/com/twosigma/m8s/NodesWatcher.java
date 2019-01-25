@@ -1,6 +1,5 @@
 package com.twosigma.m8s;
 
-import com.sun.org.apache.xpath.internal.operations.Bool;
 import io.kubernetes.client.models.V1Node;
 import io.kubernetes.client.models.V1NodeCondition;
 import io.kubernetes.client.util.Watch;
