@@ -142,6 +142,31 @@ public class M8s {
         return available;
     }
 
+    // Beware, this is inherently racy. Nothing guarantee the nodes still idle or even exists after the API calls.
+    public Set<String> getIdleNodes() throws ApiException {
+        V1PodList pods = this.coreV1Api.listPodForAllNamespaces(null, null, null, null, null, null, null, null, null);
+        Set<String> usedNodes = new HashSet<>();
+        for (V1Pod v1Pod : pods.getItems()) {
+            V1PodSpec podSpec = v1Pod.getSpec();
+            usedNodes.add(podSpec.getNodeName());
+        }
+
+        Set<String> allNodes = new HashSet<>();
+        V1NodeList nodes = this.coreV1Api.listNode(null, null, null, null, null, null, null, null, false);
+        for (V1Node v1Node : nodes.getItems()) {
+            allNodes.add(v1Node.getMetadata().getName());
+        }
+
+        Set<String> idleNodes = new HashSet<>();
+        for (String node : allNodes) {
+            if (usedNodes.contains(node)) {
+                continue;
+            }
+            idleNodes.add(node);
+        }
+        return idleNodes;
+    }
+
     public void startPod(String username, double cpus, int memoryMb, String image, String command, String nodeName, String uuid) throws ApiException {
         String namespace = "default";
         Map<String, Quantity> requests = new HashMap<>();

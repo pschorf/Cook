@@ -3,6 +3,7 @@ package com.twosigma.m8s;
 import com.google.api.client.googleapis.auth.oauth2.GoogleCredential;
 import com.google.api.services.compute.Compute;
 import com.google.api.services.compute.model.InstanceGroupManager;
+import com.google.api.services.compute.model.InstanceGroupManagersDeleteInstancesRequest;
 import com.google.api.services.compute.model.InstanceTemplate;
 import com.google.api.services.compute.model.MachineType;
 import io.kubernetes.client.ApiClient;
@@ -22,6 +23,7 @@ import com.google.api.client.json.jackson2.JacksonFactory;
 import com.google.api.client.util.store.DataStoreFactory;
 import com.google.api.services.container.Container;
 import com.google.api.services.container.ContainerScopes;
+import io.kubernetes.client.ApiException;
 
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -36,12 +38,15 @@ public class AutoScaler {
     private static final String APPLICATION_NAME = "AutoScaler";
     private static final long POLL_PERIOD_SECONDS = 10;
     private static final long MIN_TIME_BETWEEN_SCALE_UP_SECONDS = 60;
+    private static final int MIN_NODE_IDLE_TIME_BEFORE_DELETION = 5;
 
     private final ApiClient k8sClient;
     private final Container gkeClient;
     private final Compute gceClient;
     private final CookAdminClientInterface cookAdminClient;
+    private final M8s m8sClient;
     private long lastScaleUpTimeMilliseconds;
+    private Map<String, Integer> idleNodeToIdleTime;
 
     private static HttpTransport httpTransport;
     private static DataStoreFactory dataStoreFactory;
@@ -70,16 +75,27 @@ public class AutoScaler {
         }
     }
 
+    private class IGMInfo {
+        public String project;
+        public String zone;
+        public String name;
+        public IGMInfo() {
+        }
+    }
+
     public AutoScaler(
             ApiClient k8sClient,
             Container gkeClient,
             Compute gceClient,
-            CookAdminClientInterface cookAdminClient) {
+            CookAdminClientInterface cookAdminClient,
+            M8s m8sClient) {
         this.k8sClient = k8sClient;
         this.gkeClient = gkeClient;
         this.cookAdminClient = cookAdminClient;
         this.gceClient = gceClient;
+        this.m8sClient = m8sClient;
         this.lastScaleUpTimeMilliseconds = 0;
+        this.idleNodeToIdleTime = new HashMap<>();
     }
 
     public void run() throws InterruptedException {
@@ -94,6 +110,7 @@ public class AutoScaler {
                 continue;
             }
 
+            // Check if scaled up is needed
             Resource resourceToBeScaledUp = null;
             try {
                 resourceToBeScaledUp = this.cookQueueBusy();
@@ -105,22 +122,76 @@ public class AutoScaler {
 
             if (resourceToBeScaledUp == null ||
                     (resourceToBeScaledUp.numCpu == 0 && resourceToBeScaledUp.numMemMB == 0)) {
-                System.out.println("No scale up needed");
-                continue;
-            }
-
-            try {
-                System.out.println("Need to scale up " + resourceToBeScaledUp.numCpu + " cpus "
-                        + resourceToBeScaledUp.numMemMB + " mem MBs");
-                if (this.scaleUpNodePool(resourceToBeScaledUp)) {
-                    this.lastScaleUpTimeMilliseconds = System.currentTimeMillis();
+                // Scale down logic
+                try {
+                    System.out.println("No scale up needed. Considered scaling down.");
+                    this.scaleDown();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    System.out.println("Fail to scale down nodes");
                 }
-            } catch (Exception e) {
-                e.printStackTrace();
-                System.out.println("Fail to scale up node");
-                continue;
+            } else {
+                // Scale up logic
+                try {
+                    System.out.println("Need to scale up " + resourceToBeScaledUp.numCpu + " cpus "
+                            + resourceToBeScaledUp.numMemMB + " mem MBs");
+                    if (this.scaleUpNodePool(resourceToBeScaledUp)) {
+                        this.lastScaleUpTimeMilliseconds = System.currentTimeMillis();
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    System.out.println("Fail to scale up nodes");
+                }
             }
         }
+    }
+
+    private void scaleDown() throws ApiException, IOException {
+        final Set<String> idleNodes = this.m8sClient.getIdleNodes();
+        Map<String, Integer> newIdleNodeToIdleTime = new HashMap<>();
+        for (String node: idleNodes) {
+            newIdleNodeToIdleTime.put(node, 1);
+        }
+
+        Set<String> idleNodesToBeDeleted = new HashSet<>();
+        for (String node : newIdleNodeToIdleTime.keySet()) {
+            if (!this.idleNodeToIdleTime.containsKey(node)) {
+                continue;
+            }
+            int numIdleTimes = newIdleNodeToIdleTime.get(node) + this.idleNodeToIdleTime.get(node);
+            newIdleNodeToIdleTime.put(
+                    node,
+                    newIdleNodeToIdleTime.get(node) + this.idleNodeToIdleTime.get(node));
+            if (numIdleTimes > AutoScaler.MIN_NODE_IDLE_TIME_BEFORE_DELETION) {
+                idleNodesToBeDeleted.add(node);
+            }
+        }
+
+        try {
+            this.scaleDownNodes(idleNodesToBeDeleted);
+            for (String node : idleNodesToBeDeleted) {
+                newIdleNodeToIdleTime.remove(node);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+            System.out.println("Failed to scale down nodes");
+        }
+        this.idleNodeToIdleTime = newIdleNodeToIdleTime;
+    }
+
+    private void scaleDownNodes(Set<String> nodesToBeScaledDown) throws IOException {
+        final NodePool defaultPool = this.getDefaultPool();
+        final IGMInfo igmInfo = this.getIGMInfo(defaultPool);
+
+        List<String> nodeLists = new ArrayList<>();
+        nodeLists.addAll(nodesToBeScaledDown);
+        InstanceGroupManagersDeleteInstancesRequest request = new InstanceGroupManagersDeleteInstancesRequest();
+        request.setInstances(nodeLists);
+
+        Compute.InstanceGroupManagers managers = this.gceClient.instanceGroupManagers();
+        Compute.InstanceGroupManagers.DeleteInstances deleteInstance = managers.deleteInstances(
+                igmInfo.project, igmInfo.zone, igmInfo.name, request);
+        deleteInstance.execute();
     }
 
     private Resource cookQueueBusy() throws Exception {
@@ -137,8 +208,7 @@ public class AutoScaler {
         return resourceToBeScaledUp;
     }
 
-    // Super simple, get current node pool size and increment by 1
-    private boolean scaleUpNodePool(Resource resourceToBeScaledUp) throws IOException {
+    private NodePool getDefaultPool() throws IOException {
         String parent = String.format("projects/%s/locations/%s/clusters/%s", projectId, location, cluster);
         // API reference: https://cloud.google.com/kubernetes-engine/docs/reference/rest/v1/projects.locations.clusters.nodePools/list
         Container.Projects.Locations.Clusters.NodePools.List listNodePoolsRequest =
@@ -147,31 +217,43 @@ public class AutoScaler {
         List<NodePool> pools = listNodePoolsResponse.getNodePools();
 
         // TODO: We only consider 1 node pool for now
-        final NodePool defaultPool = pools.get(0);
+        return pools.get(0);
+    }
 
+    private IGMInfo getIGMInfo(NodePool pool) throws IOException {
         // Machine group url is like:
         // https://www.googleapis.com/compute/v1/projects/rodrigo-dev/zones/us-central1-a/instanceGroupManagers/gke-m8s-dev-1-default-pool-2daaf601-grp
-        final String instanceGroupUrl = defaultPool.getInstanceGroupUrls().get(0);
+        final String instanceGroupUrl = pool.getInstanceGroupUrls().get(0);
         Pattern p = Pattern.compile(
                 "https://www.googleapis.com/compute/v1/projects/([^/]+)/zones/([^/]+)/instanceGroupManagers/([^/]+)");
         Matcher m = p.matcher(instanceGroupUrl);
         if (!m.find()) {
-            System.out.println("Instance group of pool " + defaultPool.getName() +
+            System.out.println("Instance group of pool " + pool.getName() +
                     " doesn't conform to the right format (" + instanceGroupUrl + ")");
-            return false;
+            return null;
         }
 
-        final String instanceGroupProject = m.group(1);
-        final String instanceGroupZone = m.group(2);
-        final String instanceGroupName = m.group(3);
+        IGMInfo info = new IGMInfo();
+        info.project = m.group(1);
+        info.zone = m.group(2);
+        info.name = m.group(3);
+        return info;
+    }
+
+    // Super simple, get current node pool size and increment by 1
+    private boolean scaleUpNodePool(Resource resourceToBeScaledUp) throws IOException {
+        // TODO: We only consider 1 node pool for now
+        final NodePool defaultPool = this.getDefaultPool();
+        final IGMInfo igmInfo = this.getIGMInfo(defaultPool);
+
         InstanceGroupManager instanceGroupManager = this.gceClient.instanceGroupManagers().get(
-                instanceGroupProject, instanceGroupZone, instanceGroupName).execute();
+                igmInfo.project, igmInfo.zone, igmInfo.name).execute();
         final int currentTargetSize = instanceGroupManager.getTargetSize();
 
         // Instance template is like
         // https://www.googleapis.com/compute/v1/projects/rodrigo-dev/global/instanceTemplates/gke-m8s-dev-1-default-pool-ac0517f6"
-        p = Pattern.compile("https://www.googleapis.com/compute/v1/projects/([^/]+)/global/instanceTemplates/([^/]+)");
-        m = p.matcher(instanceGroupManager.getInstanceTemplate());
+        Pattern p = Pattern.compile("https://www.googleapis.com/compute/v1/projects/([^/]+)/global/instanceTemplates/([^/]+)");
+        Matcher m = p.matcher(instanceGroupManager.getInstanceTemplate());
         if (!m.find()) {
             System.out.println("Instance template of instance group " + instanceGroupManager.getSelfLink() +
                     " doesn't conform to the right format (" + instanceGroupManager.getInstanceTemplate() + ")");
@@ -184,8 +266,8 @@ public class AutoScaler {
 
         // Machine type is like n1-standard-1
         final MachineType machineType = this.gceClient.machineTypes().get(
-                instanceGroupProject,
-                instanceGroupZone,
+                igmInfo.project,
+                igmInfo.zone,
                 instanceTemplate.getProperties().getMachineType()).execute();
 
         final int numVmToBeScaledUp = Math.max(
@@ -273,9 +355,10 @@ public class AutoScaler {
 
         CookAdminClientInterface cookAdminClient = new CookAdminClient(cookUrl);
         ApiClient k8sClient = ApiClientBuilder.build(k8sConnConfigPath);
+        M8s m8sClient = new M8s(k8sClient);
         Container gkeClient = buildGkeClient(clientSecretPath);
         Compute gceClient = buildGceClient(clientSecretPath);
-        AutoScaler scaler = new AutoScaler(k8sClient, gkeClient, gceClient, cookAdminClient);
+        AutoScaler scaler = new AutoScaler(k8sClient, gkeClient, gceClient, cookAdminClient, m8sClient);
         scaler.run();
     }
 }
