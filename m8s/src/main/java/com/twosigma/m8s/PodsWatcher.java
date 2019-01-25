@@ -34,6 +34,8 @@ public class PodsWatcher implements Runnable {
             String phase = pod.getStatus().getPhase();
             if (phase.equals("Succeeded")) {
                 this.notifier.handlePodSucceeded(name, pod.getStatus().getMessage(), DateTime.now(), DateTime.now());
+            } else if (phase.equals("Running")){
+                this.notifier.handlePodRunning(name, pod.getStatus().getMessage(), DateTime.now(), DateTime.now());
             } else {
                 System.out.println("Don't know how to handle phase " + phase + " for pod " + name);
             }

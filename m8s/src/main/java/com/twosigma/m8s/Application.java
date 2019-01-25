@@ -35,11 +35,6 @@ public class Application {
                         podName, message, firstTimestamp, lastTimestamp));
             }
 
-            public void handlePodFinished(String podName, String message, DateTime firstTimestamp, DateTime lastTimestamp) {
-                System.out.println(String.format("Pod %s finished with message [%s] at (first) %s (last) %s",
-                        podName, message, firstTimestamp, lastTimestamp));
-            }
-
             public void handlePodKilled(String podName, String message, DateTime firstTimestamp, DateTime lastTimestamp) {
                 System.out.println(String.format("Pod %s killed with message [%s] at (first) %s (last) %s",
                         podName, message, firstTimestamp, lastTimestamp));
@@ -60,12 +55,18 @@ public class Application {
                 System.out.println(String.format("Pod %s succeeded with message [%s] at (first) %s (last) %s",
                         podName, message, firstTimestamp, lastTimestamp));
             }
+
+            @Override
+            public void handlePodRunning(String podName, String message, DateTime firstTimestamp, DateTime lastTimestamp) {
+                System.out.println(String.format("Pod %s running with message [%s] at (first) %s (last) %s",
+                        podName, message, firstTimestamp, lastTimestamp));
+            }
         });
 
         // Create dummy container
         String uuid = UUID.randomUUID().toString();
         System.out.println("Starting pod with uuid " + uuid);
-        m8.startPod("rodrigo", 0.5, 128, "nginx:latest", "echo test", "gke-m8s-dev-1-default-pool-2daaf601-108r", uuid);
+        m8.startPod("rodrigo", 0.1, 128, "nginx:latest", "sleep 5", "gke-m8s-dev-1-default-pool-2daaf601-x9g5", uuid);
 
         //m8.populateOrRefreshKerberosTicket("rodrigo");
 
@@ -77,9 +78,9 @@ public class Application {
         // hugepages-2Mi=Quantity{number=0, format=DECIMAL_SI},
         // pods=Quantity{number=110, format=DECIMAL_SI}}
 
-        for (Map.Entry<String, Map<String, Quantity>> stringMapEntry : m8.getAvailableResources().entrySet()) {
-            System.out.println(stringMapEntry);
-        }
+        //for (Map.Entry<String, Map<String, Quantity>> stringMapEntry : m8.getAvailableResources().entrySet()) {
+        //    System.out.println(stringMapEntry);
+        //}
     }
 
 }
