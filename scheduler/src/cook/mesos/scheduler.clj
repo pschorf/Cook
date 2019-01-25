@@ -1502,7 +1502,9 @@
 
 (defrecord CookPodEventNotifier [conn pool->fenzo]
   PodEventNotifier
-  (handlePodStarted [_ name _ _ _]
+  (handlePodStarted [_ name message _ _]
+    (log/info "Pod started event" {:name name
+                                   :message message})
     (handle-status-update conn pool->fenzo {:name name
                                             :state :task-running}))
   (handlePodSucceeded [_ name message _ _]
