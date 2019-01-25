@@ -1507,17 +1507,18 @@
                                    :message message})
     (handle-status-update conn pool->fenzo {:name name
                                             :state :task-running}))
+
+  (handlePodRunning [_ name message _ _]
+    (log/info "Pod started event" {:name name
+                                   :message message})
+    (handle-status-update conn pool->fenzo {:name name
+                                            :state :task-running}))
+
   (handlePodSucceeded [_ name message _ _]
     (log/info "Pod succeeded event: " {:name name
                                       :message message})
     (handle-status-update conn pool->fenzo {:name name
                                             :state :task-finished}))
-  (handlePodFinished [_ name message _ _]
-    (log/info "Pod finished event: " {:name name
-                                      :message message})
-    (handle-status-update conn pool->fenzo {:name name
-                                            :state :task-finished}))
-
   (handlePodKilled [_ name _ _ _]
     (handle-status-update conn pool->fenzo {:name name
                                             :state :task-failed}))
