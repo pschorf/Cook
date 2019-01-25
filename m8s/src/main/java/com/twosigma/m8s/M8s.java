@@ -67,6 +67,9 @@ public class M8s {
         V1PodList pods = this.coreV1Api.listPodForAllNamespaces(null, null, null, null, null, null, null, null, null);
         Map<String, Map<String, Quantity>> used = new HashMap<>();
         for (V1Pod v1Pod : pods.getItems()) {
+            if(!v1Pod.getStatus().getPhase().toLowerCase().equals("running")) {
+                continue;
+            }
             V1PodSpec podSpec = v1Pod.getSpec();
             String node = podSpec.getNodeName();
             if (node != null) {

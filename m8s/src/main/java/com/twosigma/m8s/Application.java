@@ -65,7 +65,7 @@ public class Application {
         // Create dummy container
         String uuid = UUID.randomUUID().toString();
         System.out.println("Starting pod with uuid " + uuid);
-        m8.startPod("rodrigo", 0.5, 128, "nginx:latest", "echo test", "gke-m8s-dev-1-default-pool-2daaf601-n4lb", uuid);
+        m8.startPod("rodrigo", 0.5, 128, "nginx:latest", "echo test", "gke-m8s-dev-1-default-pool-2daaf601-108r", uuid);
 
         //m8.populateOrRefreshKerberosTicket("rodrigo");
 
@@ -76,9 +76,11 @@ public class Application {
         // cpu=Quantity{number=0.740, format=DECIMAL_SI},
         // hugepages-2Mi=Quantity{number=0, format=DECIMAL_SI},
         // pods=Quantity{number=110, format=DECIMAL_SI}}
-        /*for (Map.Entry<String, Map<String, Quantity>> stringMapEntry : m8.getAvailableResources().entrySet()) {
+        /**
+        for (Map.Entry<String, Map<String, Quantity>> stringMapEntry : m8.getAvailableResources().entrySet()) {
             System.out.println(stringMapEntry);
-        }*/
+        }
+        **/
     }
 
 }
