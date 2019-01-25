@@ -81,25 +81,12 @@ public class M8s {
                     boolean cpuSeen = false;
                     Map<String, Quantity> requests = v1Container.getResources().getRequests();
                     if (requests != null) {
-                        for (String key : requests.keySet()) {
-                            if (key.equals("cpu")) {
-                                cpuSeen = true;
-                            }
-                            renderedByContainer.put(key, requests.get(key));
-                        }
+                        renderedByContainer = this.sumMaps(renderedByContainer, requests);
                     }
                     // Override with limits if they exists.
                     Map<String, Quantity> limits = v1Container.getResources().getLimits();
-                    if (limits != null) {
-                        for (String key : limits.keySet()) {
-                            if (key.equals("cpu")) {
-                                cpuSeen = true;
-                            }
-                            renderedByContainer.put(key, limits.get(key));
-                        }
-                    }
-                    if (!cpuSeen) {
-                        renderedByContainer.put("cpu", Quantity.fromString("100m"));
+                    if (limits != null && requests == null) {
+                        renderedByContainer = this.sumMaps(renderedByContainer, limits);
                     }
                 }
                 Map<String, Quantity> existing = used.get(node);

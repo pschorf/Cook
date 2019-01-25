@@ -76,11 +76,10 @@ public class Application {
         // cpu=Quantity{number=0.740, format=DECIMAL_SI},
         // hugepages-2Mi=Quantity{number=0, format=DECIMAL_SI},
         // pods=Quantity{number=110, format=DECIMAL_SI}}
-        /**
+
         for (Map.Entry<String, Map<String, Quantity>> stringMapEntry : m8.getAvailableResources().entrySet()) {
             System.out.println(stringMapEntry);
         }
-        **/
     }
 
 }

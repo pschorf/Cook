@@ -24,6 +24,10 @@ public class EventsWatcher implements Runnable {
         while(this.eventsWatch.hasNext()) {
             V1Event event = this.eventsWatch.next().object;
             V1ObjectReference involvedObject = event.getInvolvedObject();
+            if (involvedObject == null) {
+                System.out.println("involved object is null?!?!");
+                continue;
+            }
             String kind = involvedObject.getKind();
             if (kind == null) {
                 System.out.println("Object doesn't have a kind!?!");
