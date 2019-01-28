@@ -1,0 +1,19 @@
+apiVersion: v1
+clusters:
+  - cluster:
+      certificate-authority-data: MIIDCzCCAfOgAwIBAgIQT08wsEJdzVyxFACWN7wKhDANBgkqhkiG9w0BAQsFADAvMS0wKwYDVQQDEyRhZjUxNzU2Ny1hYjJlLTRhZTYtOTI1NC02MjNjNTlhZTM0YWEwHhcNMTkwMTI4MTQ0NzA1WhcNMjQwMTI3MTU0NzA1WjAvMS0wKwYDVQQDEyRhZjUxNzU2Ny1hYjJlLTRhZTYtOTI1NC02MjNjNTlhZTM0YWEwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDD4+Ufqp0U1EqmcJ2cGIhYdMy+XXv9MRPSsvWwyupsHfcUGov02/lMfVz7o8EW+xRRylKuH8eQFJzIA02B0YAlhS7uosZKo6f4ZxKghAl+8JJf0LPbfLRpArrBr3aULX6KWI3/McDTaPZARvflCg0AVz2m2MkyuXDWzqaXYtV+K4jcsn8jTdhZOdpjCvbGfsUNCFklPdXUkzavDdsHnOq+9eWIPy5pNQPECFVQJtMMepkHOwO63kuOe5MpnTvWiawW2hWlW+e/LNbpc1TgpsRiQdnAWStmllJ68tJ8XQEUAV5g7byruUrpyfyjg1PC3joXrfMvTo/ROJXgaJz5QSozAgMBAAGjIzAhMA4GA1UdDwEB/wQEAwICBDAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBCwUAA4IBAQCYXArX/eO4hqQiveWOrNYooBgeYiQDKqBJsHE7g1Njhh6DPLAvfyaFrfLsE8d+KlWjWxefVjXS3qcxbGND07onYtweR/IxMDi0mHrTJzLc0Mb6R3dhmVaX+fb/fMqtUAqWvz9J7+BhVNCpNrgRcK4RBr8eq7SZaHcxyOPjgp+Q4IDEswtkEzDUsP520FeT6WDdqIpAjh6L1xIg61Ls1vglOJKpqhsV3sxqU1o6HQC1uUAayvDv5IciCrL8ZkhRYZRvrbIE5PSjapiii3P2Iex3puTf8LUCvbe0wLx27/AQtktx6LtHR9Kfxw54rnBL56DQaPvmMI/Ic36oZ3uS9wRp
+      server: https://35.239.199.205
+    name: gke_rodrigo-dev_us-central1-a_standard-cluster-1
+contexts:
+  - context:
+      cluster: gke_rodrigo-dev_us-central1-a_standard-cluster-1
+      user: gke_rodrigo-dev_us-central1-a_standard-cluster-1
+    name: gke_rodrigo-dev_us-central1-a_standard-cluster-1
+current-context: gke_rodrigo-dev_us-central1-a_standard-cluster-1
+kind: Config
+preferences: {}
+users:
+  - name: gke_rodrigo-dev_us-central1-a_standard-cluster-1
+    user:
+      username: admin
+      password: fj9hSP7hsw4gNRTG

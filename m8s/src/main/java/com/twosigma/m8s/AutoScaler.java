@@ -40,6 +40,9 @@ public class AutoScaler {
     private static final long MIN_TIME_BETWEEN_SCALE_UP_SECONDS = 60;
     private static final int MIN_NODE_IDLE_TIME_BEFORE_DELETION = 5;
 
+    private final String projectId;
+    private final String location;
+    private final String cluster;
     private final ApiClient k8sClient;
     private final Container gkeClient;
     private final Compute gceClient;
@@ -50,9 +53,6 @@ public class AutoScaler {
 
     private static HttpTransport httpTransport;
     private static DataStoreFactory dataStoreFactory;
-    private static final String projectId = "rodrigo-dev";
-    private static final String location = "us-central1-a";
-    private static final String cluster = "m8s-dev-1";
     private static final java.io.File DATA_STORE_DIR =
             new java.io.File(System.getProperty("user.home"), ".store/autoscaler");
 
@@ -84,11 +84,17 @@ public class AutoScaler {
     }
 
     public AutoScaler(
+            String projectId,
+            String location,
+            String cluster,
             ApiClient k8sClient,
             Container gkeClient,
             Compute gceClient,
             CookAdminClientInterface cookAdminClient,
             M8s m8sClient) {
+        this.projectId = projectId;
+        this.location = location;
+        this.cluster = cluster;
         this.k8sClient = k8sClient;
         this.gkeClient = gkeClient;
         this.cookAdminClient = cookAdminClient;
@@ -146,7 +152,7 @@ public class AutoScaler {
         }
     }
 
-    private void scaleDown() throws ApiException, IOException {
+    public void scaleDown() throws ApiException, IOException {
         final Set<String> idleNodes = this.m8sClient.getIdleNodes();
         Map<String, Integer> newIdleNodeToIdleTime = new HashMap<>();
         for (String node: idleNodes) {
@@ -179,7 +185,7 @@ public class AutoScaler {
         this.idleNodeToIdleTime = newIdleNodeToIdleTime;
     }
 
-    private void scaleDownNodes(Set<String> nodesToBeScaledDown) throws IOException {
+    public void scaleDownNodes(Set<String> nodesToBeScaledDown) throws IOException {
         final NodePool defaultPool = this.getDefaultPool();
         final IGMInfo igmInfo = this.getIGMInfo(defaultPool);
 
@@ -194,7 +200,31 @@ public class AutoScaler {
         deleteInstance.execute();
     }
 
-    private Resource cookQueueBusy() throws Exception {
+    public int getNodePoolTargetSize() throws IOException {
+        final NodePool defaultPool = this.getDefaultPool();
+        final IGMInfo igmInfo = this.getIGMInfo(defaultPool);
+
+        InstanceGroupManager instanceGroupManager = this.gceClient.instanceGroupManagers().get(
+                igmInfo.project, igmInfo.zone, igmInfo.name).execute();
+        return instanceGroupManager.getTargetSize();
+    }
+
+    public void scaleNodePool(int targetSize) throws IOException {
+        // TODO: We only consider 1 node pool for now
+        final NodePool defaultPool = this.getDefaultPool();
+
+        // API reference: https://cloud.google.com/kubernetes-engine/docs/reference/rest/v1/projects.locations.clusters.nodePools/setSize
+        final String poolName = String.format("projects/%s/locations/%s/clusters/%s/nodePools/%s",
+                projectId, location, cluster, defaultPool.getName());
+        SetNodePoolSizeRequest setNodePoolSizeRequest = new SetNodePoolSizeRequest().setNodeCount(targetSize);
+        Container.Projects.Locations.Clusters.NodePools.SetSize setSizeRequest =
+                this.gkeClient.projects().locations().clusters().nodePools().setSize(poolName, setNodePoolSizeRequest);
+
+        // This resize request will fail if the previous resize hasn't finished reconciliation.
+        setSizeRequest.execute();
+    }
+
+    public Resource cookQueueBusy() throws Exception {
         List<CookJob> jobs = this.cookAdminClient.getCookQueue();
         if (jobs.isEmpty()) {
             return null;
@@ -208,7 +238,7 @@ public class AutoScaler {
         return resourceToBeScaledUp;
     }
 
-    private NodePool getDefaultPool() throws IOException {
+    public NodePool getDefaultPool() throws IOException {
         String parent = String.format("projects/%s/locations/%s/clusters/%s", projectId, location, cluster);
         // API reference: https://cloud.google.com/kubernetes-engine/docs/reference/rest/v1/projects.locations.clusters.nodePools/list
         Container.Projects.Locations.Clusters.NodePools.List listNodePoolsRequest =
@@ -220,7 +250,7 @@ public class AutoScaler {
         return pools.get(0);
     }
 
-    private IGMInfo getIGMInfo(NodePool pool) throws IOException {
+    public IGMInfo getIGMInfo(NodePool pool) throws IOException {
         // Machine group url is like:
         // https://www.googleapis.com/compute/v1/projects/rodrigo-dev/zones/us-central1-a/instanceGroupManagers/gke-m8s-dev-1-default-pool-2daaf601-grp
         final String instanceGroupUrl = pool.getInstanceGroupUrls().get(0);
@@ -241,7 +271,7 @@ public class AutoScaler {
     }
 
     // Super simple, get current node pool size and increment by 1
-    private boolean scaleUpNodePool(Resource resourceToBeScaledUp) throws IOException {
+    public boolean scaleUpNodePool(Resource resourceToBeScaledUp) throws IOException {
         // TODO: We only consider 1 node pool for now
         final NodePool defaultPool = this.getDefaultPool();
         final IGMInfo igmInfo = this.getIGMInfo(defaultPool);
@@ -293,7 +323,7 @@ public class AutoScaler {
     /**
      * Authorizes the installed application to access user's protected data.
      */
-    private static Credential authorize(String clientSecretFilename) throws Exception {
+    public static Credential authorize(String clientSecretFilename) throws Exception {
         // initialize client secrets object
         GoogleClientSecrets clientSecrets = GoogleClientSecrets.load(JSON_FACTORY, new InputStreamReader(
                 new FileInputStream(clientSecretFilename)));
@@ -305,7 +335,7 @@ public class AutoScaler {
         return new AuthorizationCodeInstalledApp(flow, new LocalServerReceiver()).authorize("user");
     }
 
-    private static GoogleCredential getGoogleCredential(String clientSecretFilename) throws IOException {
+    public static GoogleCredential getGoogleCredential(String clientSecretFilename) throws IOException {
         if (clientSecretFilename == null) {
             return GoogleCredential.getApplicationDefault();
         }
@@ -319,7 +349,7 @@ public class AutoScaler {
      * Build a GKE client
      * API Example: https://github.com/google/google-api-java-client-samples/tree/master/compute-engine-cmdline-sample
      */
-    private static Container buildGkeClient(String clientSecretFilename) throws Exception {
+    public static Container buildGkeClient(String clientSecretFilename) throws Exception {
         GoogleCredential credential = AutoScaler.getGoogleCredential(clientSecretFilename);
         // Create compute engine object for listing instances
         httpTransport = GoogleNetHttpTransport.newTrustedTransport();
@@ -333,7 +363,7 @@ public class AutoScaler {
      * Build a GCE client
      * API Example: https://github.com/google/google-api-java-client-samples/tree/master/compute-engine-cmdline-sample
      */
-    private static Compute buildGceClient(String clientSecretFilename) throws Exception {
+    public static Compute buildGceClient(String clientSecretFilename) throws Exception {
         GoogleCredential credential = AutoScaler.getGoogleCredential(clientSecretFilename);
 
         // Create compute engine object for listing instances
@@ -358,7 +388,15 @@ public class AutoScaler {
         M8s m8sClient = new M8s(k8sClient);
         Container gkeClient = buildGkeClient(clientSecretPath);
         Compute gceClient = buildGceClient(clientSecretPath);
-        AutoScaler scaler = new AutoScaler(k8sClient, gkeClient, gceClient, cookAdminClient, m8sClient);
+        AutoScaler scaler = new AutoScaler(
+                "rodrigo-dev",
+                "us-central1-a",
+                "m8s-dev-1",
+                k8sClient,
+                gkeClient,
+                gceClient,
+                cookAdminClient,
+                m8sClient);
         scaler.run();
     }
 }

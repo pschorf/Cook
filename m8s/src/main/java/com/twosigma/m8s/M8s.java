@@ -142,6 +142,29 @@ public class M8s {
         return available;
     }
 
+    public List<V1Node> listReadyNode() throws ApiException {
+        List<V1Node> nodes = this.coreV1Api.listNode(null, null, null, null, null, null, null, null, false).getItems();
+        List<V1Node> readyNodes = new ArrayList<V1Node>();
+        for (V1Node node: nodes) {
+            List<V1NodeCondition> conds = node.getStatus().getConditions();
+            boolean ready = true;
+            for (V1NodeCondition cond : conds) {
+                if (cond.getType().equals("Ready") && cond.getStatus().equals("False")) {
+                    ready = false;
+                    break;
+                }
+                if (cond.getType().equals("NetworkUnavailable") && cond.getStatus().equals("True")) {
+                    ready = false;
+                    break;
+                }
+            }
+            if (ready) {
+                readyNodes.add(node);
+            }
+        }
+        return readyNodes;
+    }
+
     // Beware, this is inherently racy. Nothing guarantee the nodes still idle or even exists after the API calls.
     public Set<String> getIdleNodes() throws ApiException {
         V1PodList pods = this.coreV1Api.listPodForAllNamespaces(null, null, null, null, null, null, null, null, null);
