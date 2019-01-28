@@ -1533,10 +1533,9 @@
   NodeEventNotifier
   (handleNodeUp [this nodename]
                 (let [resources (.getAvailableResources api-client)]
-                  (reset! util/resource-availability-cache (pc/map-vals (fn [type->quantity]
-                                                                          (pc/map-vals (fn [quantity] (-> quantity .getNumber .doubleValue))
-                                                                                       type->quantity))
-                                                                        resources)))))
+                  (swap! util/resource-availability-cache (fn [cache]
+                                                            (assoc cache nodename (pc/map-vals (fn [quantity] (-> quantity .getNumber .doubleValue))
+                                                                                               (get resources nodename))))))))
 
 (defn create-mesos-scheduler
   "Creates the mesos scheduler which processes status updates asynchronously but in order of receipt."
