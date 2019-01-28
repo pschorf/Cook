@@ -208,7 +208,11 @@ public class M8s {
             Long resourceVersion = Long.valueOf(pod.getMetadata().getResourceVersion());
             maxResourceVersion = Math.max(maxResourceVersion, resourceVersion);
         }
-        Call call = this.coreV1Api.listNamespacedPodCall(namespace, null, null, null, null, null, null, maxResourceVersion.toString(), null, Boolean.TRUE, null, null);
+        String strResourceVersion = null;
+        if (maxResourceVersion != Long.MIN_VALUE) {
+            strResourceVersion = maxResourceVersion.toString();
+        }
+        Call call = this.coreV1Api.listNamespacedPodCall(namespace, null, null, null, null, null, null, strResourceVersion, null, Boolean.TRUE, null, null);
         return Watch.createWatch(this.apiClient, call, new TypeToken<Watch.Response<V1Pod>>() {}.getType());
     }
 
@@ -219,7 +223,11 @@ public class M8s {
             Long resourceVersion = Long.valueOf(node.getMetadata().getResourceVersion());
             maxResourceVersion = Math.max(maxResourceVersion, resourceVersion);
         }
-        Call call = this.coreV1Api.listNodeCall(null, null, null, true, null, null, maxResourceVersion.toString(), null, true, null, null);
+        String strResourceVersion = null;
+        if (maxResourceVersion != Long.MIN_VALUE) {
+            strResourceVersion = maxResourceVersion.toString();
+        }
+        Call call = this.coreV1Api.listNodeCall(null, null, null, true, null, null, strResourceVersion, null, true, null, null);
         return Watch.createWatch(this.apiClient, call, new TypeToken<Watch.Response<V1Node>>() {}.getType());
     }
 
