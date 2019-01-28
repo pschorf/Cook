@@ -11,11 +11,6 @@ import io.kubernetes.client.ApiClient;
 import com.google.api.services.container.model.ListNodePoolsResponse;
 import com.google.api.services.container.model.NodePool;
 import com.google.api.services.container.model.SetNodePoolSizeRequest;
-import com.google.api.client.auth.oauth2.Credential;
-import com.google.api.client.extensions.java6.auth.oauth2.AuthorizationCodeInstalledApp;
-import com.google.api.client.extensions.jetty.auth.oauth2.LocalServerReceiver;
-import com.google.api.client.googleapis.auth.oauth2.GoogleAuthorizationCodeFlow;
-import com.google.api.client.googleapis.auth.oauth2.GoogleClientSecrets;
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
 import com.google.api.client.http.HttpTransport;
 import com.google.api.client.json.JsonFactory;
@@ -27,7 +22,6 @@ import io.kubernetes.client.ApiException;
 
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -200,30 +194,6 @@ public class AutoScaler {
         deleteInstance.execute();
     }
 
-    public int getNodePoolTargetSize() throws IOException {
-        final NodePool defaultPool = this.getDefaultPool();
-        final IGMInfo igmInfo = this.getIGMInfo(defaultPool);
-
-        InstanceGroupManager instanceGroupManager = this.gceClient.instanceGroupManagers().get(
-                igmInfo.project, igmInfo.zone, igmInfo.name).execute();
-        return instanceGroupManager.getTargetSize();
-    }
-
-    public void scaleNodePool(int targetSize) throws IOException {
-        // TODO: We only consider 1 node pool for now
-        final NodePool defaultPool = this.getDefaultPool();
-
-        // API reference: https://cloud.google.com/kubernetes-engine/docs/reference/rest/v1/projects.locations.clusters.nodePools/setSize
-        final String poolName = String.format("projects/%s/locations/%s/clusters/%s/nodePools/%s",
-                projectId, location, cluster, defaultPool.getName());
-        SetNodePoolSizeRequest setNodePoolSizeRequest = new SetNodePoolSizeRequest().setNodeCount(targetSize);
-        Container.Projects.Locations.Clusters.NodePools.SetSize setSizeRequest =
-                this.gkeClient.projects().locations().clusters().nodePools().setSize(poolName, setNodePoolSizeRequest);
-
-        // This resize request will fail if the previous resize hasn't finished reconciliation.
-        setSizeRequest.execute();
-    }
-
     public Resource cookQueueBusy() throws Exception {
         List<CookJob> jobs = this.cookAdminClient.getCookQueue();
         if (jobs.isEmpty()) {
@@ -320,19 +290,28 @@ public class AutoScaler {
         return true;
     }
 
-    /**
-     * Authorizes the installed application to access user's protected data.
-     */
-    public static Credential authorize(String clientSecretFilename) throws Exception {
-        // initialize client secrets object
-        GoogleClientSecrets clientSecrets = GoogleClientSecrets.load(JSON_FACTORY, new InputStreamReader(
-                new FileInputStream(clientSecretFilename)));
-        // set up authorization code flow
-        GoogleAuthorizationCodeFlow flow = new GoogleAuthorizationCodeFlow.Builder(
-                httpTransport, JSON_FACTORY, clientSecrets, SCOPES).setDataStoreFactory(dataStoreFactory)
-                .build();
-        // authorize
-        return new AuthorizationCodeInstalledApp(flow, new LocalServerReceiver()).authorize("user");
+    public int getNodePoolTargetSize() throws IOException {
+        final NodePool defaultPool = this.getDefaultPool();
+        final IGMInfo igmInfo = this.getIGMInfo(defaultPool);
+
+        InstanceGroupManager instanceGroupManager = this.gceClient.instanceGroupManagers().get(
+                igmInfo.project, igmInfo.zone, igmInfo.name).execute();
+        return instanceGroupManager.getTargetSize();
+    }
+
+    public void scaleNodePool(int targetSize) throws IOException {
+        // TODO: We only consider 1 node pool for now
+        final NodePool defaultPool = this.getDefaultPool();
+
+        // API reference: https://cloud.google.com/kubernetes-engine/docs/reference/rest/v1/projects.locations.clusters.nodePools/setSize
+        final String poolName = String.format("projects/%s/locations/%s/clusters/%s/nodePools/%s",
+                projectId, location, cluster, defaultPool.getName());
+        SetNodePoolSizeRequest setNodePoolSizeRequest = new SetNodePoolSizeRequest().setNodeCount(targetSize);
+        Container.Projects.Locations.Clusters.NodePools.SetSize setSizeRequest =
+                this.gkeClient.projects().locations().clusters().nodePools().setSize(poolName, setNodePoolSizeRequest);
+
+        // This resize request will fail if the previous resize hasn't finished reconciliation.
+        setSizeRequest.execute();
     }
 
     public static GoogleCredential getGoogleCredential(String clientSecretFilename) throws IOException {

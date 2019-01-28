@@ -142,8 +142,12 @@ public class M8s {
         return available;
     }
 
-    public List<V1Node> listReadyNode() throws ApiException {
+    public List<V1Node> listNode(boolean isReady) throws ApiException {
         List<V1Node> nodes = this.coreV1Api.listNode(null, null, null, null, null, null, null, null, false).getItems();
+        if (!isReady) {
+            return nodes;
+        }
+
         List<V1Node> readyNodes = new ArrayList<V1Node>();
         for (V1Node node: nodes) {
             List<V1NodeCondition> conds = node.getStatus().getConditions();

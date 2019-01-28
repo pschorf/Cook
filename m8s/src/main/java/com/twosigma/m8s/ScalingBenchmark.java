@@ -33,6 +33,7 @@ public class ScalingBenchmark {
                 null,
                 m8sClient);
 
+        boolean readyNode = false;
         int currentSize = scaler.getNodePoolTargetSize();
         int targetSize = currentSize - 100;
 
@@ -40,22 +41,30 @@ public class ScalingBenchmark {
         long startTimeMillis = System.currentTimeMillis();
         scaler.scaleNodePool(targetSize);
         while(true) {
-            int numReadyNode = m8sClient.listReadyNode().size();
-            System.out.println("Num ready node " + numReadyNode + ", waiting for " + targetSize);
-            if (numReadyNode == targetSize) {
+            int numNode = m8sClient.listNode(readyNode).size();
+            System.out.println("Num node (isReady:" + readyNode + ") " + numNode + ", waiting for " + targetSize);
+            if (numNode == targetSize) {
                 break;
             }
             Thread.currentThread().sleep(5000);
         }
         long endTimeMillis = System.currentTimeMillis();
         long durationSecs = (endTimeMillis - startTimeMillis) / 1000;
-        // Sample run data:
+        // Sample run data for isReady=true:
         // + Scale up 1 node took 87 secs
         // + Scale up 10 nodes took 82/114 secs
         // + Scale up 100 nodes took 111 secs
         // + Scale down 1 node took 188 seconds
         // + Scale down 10 nodes took 173 seconds
         // + Scale down 100 nodes took 239 seconds
+
+        // Sample run data for isReady=false:
+        // + Scale up 1 node took 76 secs
+        // + Scale up 10 nodes took 54 secs
+        // + Scale up 100 nodes took 90 secs
+        // + Scale down 1 node took 147 seconds
+        // + Scale down 10 nodes took 158 seconds
+        // + Scale down 100 nodes took 261 seconds
         System.out.println("Scaling from " + currentSize + " to " + targetSize + " takes " + durationSecs + " seconds");
     }
 
