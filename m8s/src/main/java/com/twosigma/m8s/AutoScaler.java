@@ -61,8 +61,8 @@ public class AutoScaler {
     private static final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
 
     private class Resource {
-        public int numCpu;
-        public int numMemMB;
+        public double numCpu;
+        public double numMemMB;
         public Resource() {
             this.numCpu = 0;
             this.numMemMB = 0;
@@ -121,7 +121,7 @@ public class AutoScaler {
             }
 
             if (resourceToBeScaledUp == null ||
-                    (resourceToBeScaledUp.numCpu == 0 && resourceToBeScaledUp.numMemMB == 0)) {
+                    (resourceToBeScaledUp.numCpu == 0.0 && resourceToBeScaledUp.numMemMB == 0.0)) {
                 // Scale down logic
                 try {
                     System.out.println("No scale up needed. Considered scaling down.");
@@ -271,8 +271,8 @@ public class AutoScaler {
                 instanceTemplate.getProperties().getMachineType()).execute();
 
         final int numVmToBeScaledUp = Math.max(
-            resourceToBeScaledUp.numCpu / machineType.getGuestCpus() + 1,
-            resourceToBeScaledUp.numMemMB / machineType.getMemoryMb() + 1
+            Math.toIntExact(Math.round(resourceToBeScaledUp.numCpu / machineType.getGuestCpus())) + 1,
+            Math.toIntExact(Math.round(resourceToBeScaledUp.numMemMB / machineType.getMemoryMb())) + 1
         );
 
         // API reference: https://cloud.google.com/kubernetes-engine/docs/reference/rest/v1/projects.locations.clusters.nodePools/setSize
