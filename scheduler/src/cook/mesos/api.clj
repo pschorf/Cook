@@ -2991,7 +2991,7 @@
         "/resources" []
         (c-api/resource
          {:produces ["application/json"]
-          :responses {200 {:schema {s/Str {s/Str s/Num}}}}
+          :responses {200 {:schema {s/Str s/Any}}}
           :get {:summary "Returns resources"
                 :handler (resource-handler)}}))
 

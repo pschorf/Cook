@@ -246,9 +246,14 @@
                       instance)
              (log/debug "Unassigning task" task-id "from" (:instance/hostname instance-ent))
              (swap! util/resource-availability-cache (fn [cache]
-                                                       (let [node (:instance/hostname instance-ent)]
-                                                         (update-in cache [node "memory"] #(+ % (:mem job-resources)))
-                                                         (update-in cache [node "cpu"] #(+ % (:cpus job-resources))))))
+                                                       (let [node (:instance/hostname instance-ent)
+                                                             running (get-in cache [node :running] #{})]
+                                                         (if (contains? running (:job/uuid job-ent))
+                                                           (-> cache
+                                                               (update-in [node :free "memory"] #(+ % (:mem job-resources)))
+                                                               (update-in [node :free "cpu"] #(+ % (:cpus job-resources)))
+                                                               (update-in [node :running] #(disj % (:job/uuid job-ent))))
+                                                           cache))))
              (try
                (locking fenzo
                  (.. fenzo
@@ -757,8 +762,9 @@
                                           :mem mem})
     (swap! util/resource-availability-cache (fn [cached-resources]
                                               (-> cached-resources
-                                                  (update-in [node "memory"] #(- % mem))
-                                                  (update-in [node "cpu"] #(- % cpus)))))))
+                                                  (update-in [node :free "memory"] #(- % mem))
+                                                  (update-in [node :free "cpu"] #(- % cpus))
+                                                  (update-in [node :running] #(conj % (get-in task-request [:job :job/uuid]))))))))
 
 (defn launch-matched-tasks!
   "Updates the state of matched tasks in the database and then launches them."
@@ -918,7 +924,7 @@
 (defn get-m8s-offers [api-client]
   (let [available-resources @util/resource-availability-cache]
     (map (fn [[node resource-map]]
-           (M8sLeaseAdapter. (str (java.util.UUID/randomUUID)) (System/currentTimeMillis) node resource-map))
+           (M8sLeaseAdapter. (str (java.util.UUID/randomUUID)) (System/currentTimeMillis) node (:free resource-map)))
          available-resources)))
 
 (defn make-offer-handler
@@ -1534,8 +1540,9 @@
   (handleNodeUp [this nodename]
                 (let [resources (.getAvailableResources api-client)]
                   (swap! util/resource-availability-cache (fn [cache]
-                                                            (assoc cache nodename (pc/map-vals (fn [quantity] (-> quantity .getNumber .doubleValue))
-                                                                                               (get resources nodename))))))))
+                                                            (assoc cache nodename {:free (pc/map-vals (fn [quantity] (-> quantity .getNumber .doubleValue))
+                                                                                                      (get resources nodename))
+                                                                                   :running #{}}))))))
 
 (defn create-mesos-scheduler
   "Creates the mesos scheduler which processes status updates asynchronously but in order of receipt."
@@ -1547,8 +1554,9 @@
         pod-event-notifier (CookPodEventNotifier. conn pool->fenzo)]
     (let [resources (.getAvailableResources api-client)]
       (reset! util/resource-availability-cache (pc/map-vals (fn [type->quantity]
-                                                              (pc/map-vals (fn [quantity] (-> quantity .getNumber .doubleValue))
-                                                                           type->quantity))
+                                                              {:free (pc/map-vals (fn [quantity] (-> quantity .getNumber .doubleValue))
+                                                                                  type->quantity)
+                                                               :running #{}})
                                                             resources)))
     (.pollPodEvents api-client "default" pod-event-notifier)
     (.pollNodeEvents api-client (CookNodeEventNotifier. api-client))))
