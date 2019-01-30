@@ -16,4 +16,4 @@ users:
 - name: gke_rodrigo-dev_us-central1-a_m8s-dev-1
   user:
     username: admin
-    password: isKtEhUzrMGhsjjd
+    password: _BLAH
