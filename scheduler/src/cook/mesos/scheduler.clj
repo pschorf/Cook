@@ -55,6 +55,7 @@
                              VMTaskFitnessCalculator VirtualMachineLease VirtualMachineLease$Range
                              VirtualMachineCurrentState]
           [io.kubernetes.client ApiClient]
+          [java.util.concurrent CompletableFuture Executors]
           [com.twosigma.m8s M8s ApiClientBuilder PodEventNotifier NodeEventNotifier]
           [com.netflix.fenzo.functions Action1 Func1]))
 
@@ -766,6 +767,8 @@
                                                   (update-in [node :free "cpu"] #(- % cpus))
                                                   (update-in [node :running] #(conj % (get-in task-request [:job :job/uuid]))))))))
 
+(def launch-executor (Executors/newFixedThreadPool 10))
+
 (defn launch-matched-tasks!
   "Updates the state of matched tasks in the database and then launches them."
   [matches conn db api-client fenzo framework-id mesos-run-as-user pool-name]
@@ -809,30 +812,31 @@
                                          :task-metadata-seq task-metadata-seq})
         ;; TODO(pschorf) - launch tasks
         ; (mesos/launch-tasks! driver (mapv :id offers) task-infos)
-        (doseq [task-metadata task-metadata-seq]
-          (let [task-request (:task-request task-metadata)
-                cpus (get-in task-request [:resources :cpus])
-                mem (get-in task-request [:resources :mem])
-                tpus 0
-                image (get-in task-metadata [:container :docker :image])
-                command (get-in task-request [:job :job/command])
-                hostname (:hostname task-metadata)
-;                user (get-in task-request [:job :job/user])
-                user "rodrigo"
-                environment (util/job-ent->env (:job task-request))
-                instance-id (:task-id task-metadata)]
-            (log/debug "launching job" {:cpus cpus
-                                        :mem mem
-                                        :user user
-                                        :image image
-                                        :command command
-                                        :tpus 0
-                                        :node hostname
-                                        :env environment
-                                        :instance-id instance-id})
-            (consume-resources task-metadata)
-            (.startPod api-client user cpus tpus mem image command environment hostname instance-id)))
-        (log/info "TIMING done launching")
+        (let [futures (for [task-metadata task-metadata-seq]
+                        (let [task-request (:task-request task-metadata)
+                              cpus (get-in task-request [:resources :cpus])
+                              mem (get-in task-request [:resources :mem])
+                              tpus 0
+                              image (get-in task-metadata [:container :docker :image])
+                              command (get-in task-request [:job :job/command])
+                              hostname (:hostname task-metadata)
+                                        ;                user (get-in task-request [:job :job/user])
+                              user "rodrigo"
+                              environment (util/job-ent->env (:job task-request))
+                              instance-id (:task-id task-metadata)]
+                          (log/debug "launching job" {:cpus cpus
+                                                      :mem mem
+                                                      :user user
+                                                      :image image
+                                                      :command command
+                                                      :tpus 0
+                                                      :node hostname
+                                                      :env environment
+                                                      :instance-id instance-id})
+                          (consume-resources task-metadata)
+                          (CompletableFuture/runAsync (fn [] (.startPod api-client user cpus tpus mem image command environment hostname instance-id))
+                                                      launch-executor)))]
+          (.join (CompletableFuture/allOf (into-array CompletableFuture futures))))
         (doseq [{:keys [hostname task-request] :as meta} task-metadata-seq]
           ; Iterate over the tasks we matched
           (let [user (get-in task-request [:job :job/user])]
@@ -840,7 +844,8 @@
           (locking fenzo
             (.. fenzo
                 (getTaskAssigner)
-                (call task-request hostname))))))))
+                (call task-request hostname)))))
+      (log/info "TIMING done launching"))))
 
 (defn update-host-reservations!
   "Updates the rebalancer-reservation-atom with the result of the match cycle.
