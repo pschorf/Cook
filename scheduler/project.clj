@@ -176,9 +176,9 @@
                                                       com.sun.jdmk/jmxtools
                                                       com.sun.jmx/jmxri]]
                    [ring/ring-jetty-adapter "1.5.0"]]
-    :jvm-opts ["-Xms2G"
+    :jvm-opts ["-Xms20G"
                "-XX:-OmitStackTraceInFastThrow"
-               "-Xmx2G"
+               "-Xmx20G"
                "-Dcom.sun.management.jmxremote.authenticate=false"
                "-Dcom.sun.management.jmxremote.ssl=false"]
     :resource-paths ["test-resources"]
@@ -213,6 +213,8 @@
              ;"-Dsun.security.jgss.lib=/opt/mitkrb5/lib/libgssapi_krb5.so"
              ;"-Djavax.security.auth.useSubjectCredsOnly=false"
              "-verbose:gc"
+             "-Xmx20G"
+             "-Xms20G"
              "-XX:+PrintGCDetails"
              "-Xloggc:gclog"
              "-XX:+UseGCLogFileRotation"

@@ -32,7 +32,6 @@
                 "cook.mesos.data-locality" :debug
                 "cook.mesos.fenzo-utils" :debug
                 "cook.mesos.rebalancer" :debug
-                "cook.mesos.scheduler" :debug
                 :default :info}}
  :metrics {:jmx true
            :user-metrics-interval-seconds 60}
@@ -51,9 +50,9 @@
  :rate-limit {:expire-minutes 120 ; Expire unused rate limit entries after 2 hours.
               ; Keep these job-launch and job-submission values as they are for integration tests. Making them smaller can cause
               ; spurious failures, and making them larger will cause test_rate_limit_launching_jobs to skip itself.
-              :job-launch {:bucket-size 10000
+              :job-launch {:bucket-size 1000
                            :enforce? true
-                           :tokens-replenished-per-minute 5000}
+                           :tokens-replenished-per-minute 6000}
               :job-submission {:bucket-size 1000
                                :enforce? true
                                :tokens-replenished-per-minute 600}

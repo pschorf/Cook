@@ -776,6 +776,7 @@
     ;; during a race. If that happens, then other jobs that should
     ;; be scheduled will not be eligible for rescheduling until
     ;; the pending-jobs atom is repopulated
+    (log/info "TIMING writing to datomic")
     (timers/time!
       (timers/timer (metric-title "handle-resource-offer!-transact-task-duration" pool-name))
       (datomic/transact
@@ -799,6 +800,7 @@
       (meters/mark! scheduler-offer-matched num-offers-matched)
       (histograms/update! number-offers-matched num-offers-matched))
     (meters/mark! (meters/meter (metric-title "matched-tasks" pool-name)) (count task-txns))
+    (log/info "TIMING submitting to k8s")
     (timers/time!
       (timers/timer (metric-title "handle-resource-offer!-mesos-submit-duration" pool-name))
       ;; Iterates over offers (each offer can match to multiple tasks)
@@ -830,6 +832,7 @@
                                         :instance-id instance-id})
             (consume-resources task-metadata)
             (.startPod api-client user cpus tpus mem image command environment hostname instance-id)))
+        (log/info "TIMING done launching")
         (doseq [{:keys [hostname task-request] :as meta} task-metadata-seq]
           ; Iterate over the tasks we matched
           (let [user (get-in task-request [:job :job/user])]
@@ -854,6 +857,7 @@
   [conn api-client ^TaskScheduler fenzo framework-id pool-name->pending-jobs-atom mesos-run-as-user
    user->usage user->quota num-considerable offers-chan offers rebalancer-reservation-atom pool-name]
   (log/debug "In" pool-name "pool, invoked handle-resource-offers!")
+  (log/info "TIMING starting offer match")
   (let [offer-stash (atom nil)] ;; This is a way to ensure we never lose offers fenzo assigned if an error occurs in the middle of processing
     ;; TODO: It is possible to have an offer expire by mesos because we recycle it a bunch of times.
     ;; TODO: If there is an exception before offers are sent to fenzo (scheduleOnce) then the offers will be lost. This is fine with offer expiration, but not great.
@@ -866,9 +870,11 @@
                                   (timers/timer (metric-title "handle-resource-offer!-considerable-jobs-duration" pool-name))
                                   (pending-jobs->considerable-jobs
                                     db pending-jobs user->quota user->usage num-considerable pool-name))
+              _ (log/info "TIMING matching")
               {:keys [matches failures]} (timers/time!
                                            (timers/timer (metric-title "handle-resource-offer!-match-duration" pool-name))
                                            (match-offer-to-schedule db fenzo considerable-jobs offers rebalancer-reservation-atom))
+              _ (log/info "TIMING done matching")
               _ (log/debug "In" pool-name "pool, got matches:" matches)
               offers-scheduled (for [{:keys [leases]} matches
                                      lease leases]
@@ -896,7 +902,9 @@
             (do
               (swap! pool-name->pending-jobs-atom remove-matched-jobs-from-pending-jobs matched-job-uuids pool-name)
               (log/debug "In" pool-name "pool, updated pool-name->pending-jobs-atom:" @pool-name->pending-jobs-atom)
+              (log/info "TIMING launching tasks")
               (launch-matched-tasks! matches conn db api-client fenzo framework-id mesos-run-as-user pool-name)
+              (log/info "TIMING done launching tasks")
               (update-host-reservations! rebalancer-reservation-atom matched-job-uuids)
               matched-considerable-jobs-head?)))
         (catch Throwable t
