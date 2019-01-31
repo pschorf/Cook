@@ -811,21 +811,25 @@
           (let [task-request (:task-request task-metadata)
                 cpus (get-in task-request [:resources :cpus])
                 mem (get-in task-request [:resources :mem])
+                tpus 0
                 image (get-in task-metadata [:container :docker :image])
                 command (get-in task-request [:job :job/command])
                 hostname (:hostname task-metadata)
 ;                user (get-in task-request [:job :job/user])
                 user "rodrigo"
+                environment (util/job-ent->env (:job task-request))
                 instance-id (:task-id task-metadata)]
             (log/debug "launching job" {:cpus cpus
                                         :mem mem
                                         :user user
                                         :image image
                                         :command command
+                                        :tpus 0
                                         :node hostname
+                                        :env environment
                                         :instance-id instance-id})
             (consume-resources task-metadata)
-            (.startPod api-client user cpus mem image command hostname instance-id)))
+            (.startPod api-client user cpus tpus mem image command environment hostname instance-id)))
         (doseq [{:keys [hostname task-request] :as meta} task-metadata-seq]
           ; Iterate over the tasks we matched
           (let [user (get-in task-request [:job :job/user])]
@@ -1571,7 +1575,7 @@
   (persist-mea-culpa-failure-limit! conn mea-culpa-failure-limit)
 
   (let [{:keys [match-trigger-chan progress-updater-trigger-chan rank-trigger-chan]} trigger-chans
-        api-client (M8s. (ApiClientBuilder/build "../m8s/config/m8s-dev-1.yaml"))
+        api-client (M8s. (ApiClientBuilder/build "../m8s/config/m8s-dev-tpu.yaml"))
         pools (pool/all-pools (d/db conn))
         pools' (if (-> pools count pos?)
                  pools
