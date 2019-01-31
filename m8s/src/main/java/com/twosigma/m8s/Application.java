@@ -18,7 +18,7 @@ public class Application {
 
         // Create an API client to talk to a k8s cluster. Here we pass a config file,
         // we could easily use this to talk to more than 1 gke cluster
-        ApiClient apiClient = ApiClientBuilder.build("config/m8s-dev-1.yaml");
+        ApiClient apiClient = ApiClientBuilder.build("config/m8s-dev-tpu.yaml");
         M8s m8 = new M8s(apiClient);
 
         m8.pollNodeEvents(new NodeEventNotifier() {
