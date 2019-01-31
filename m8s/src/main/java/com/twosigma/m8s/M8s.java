@@ -194,18 +194,59 @@ public class M8s {
         return idleNodes;
     }
 
-    public void startPod(String username, double cpus, int memoryMb, String image, String command, String nodeName, String uuid) throws ApiException {
+    public void startPod(
+            String username, double cpus, int tpus, int memoryMb, String image,
+            String command, Map<String, String> environmentVariables, String nodeName,
+            String uuid) throws ApiException
+    {
         String namespace = "default";
         Map<String, Quantity> requests = new HashMap<>();
-        requests.put("cpu", Quantity.fromString(Double.toString(cpus * 1000) + "m"));
-        requests.put("memory", Quantity.fromString(memoryMb + "Mi"));
+        Map<String, Quantity> limits = new HashMap<>();
+
+        Quantity cpusQty = Quantity.fromString(Double.toString(cpus * 1000) + "m");
+        Quantity memQty = Quantity.fromString(memoryMb + "Mi");
+
+        requests.put("cpu", cpusQty);
+        requests.put("memory", memQty);
+        limits.put("cpu", cpusQty);
+        limits.put("memory", memQty);
+
+        V1ObjectMetaBuilder metaBuilder = new V1ObjectMetaBuilder()
+                .withName(uuid);
+
+        if (tpus != 0 && tpus != 8) {
+            throw new IllegalArgumentException("tpus must be 0 or 8");
+        }
+
+        if (tpus > 0) {
+            Map<String, String> tpuAnnotations = new HashMap<>();
+            tpuAnnotations.put("tf-version.cloud-tpus.google.com", "1.11");
+            metaBuilder.withAnnotations(tpuAnnotations);
+            limits.put("cloud-tpus.google.com/v2", Quantity.fromString(Integer.toString(tpus)));
+        }
+
+        List<V1EnvVar> envVars = new ArrayList<>();
+        if (environmentVariables != null) {
+            for (Map.Entry<String, String> kv : environmentVariables.entrySet()) {
+                envVars.add(new V1EnvVarBuilder()
+                        .withName(kv.getKey())
+                        .withValue(kv.getValue())
+                        .build());
+            }
+        }
+        envVars.add(new V1EnvVarBuilder()
+                .withName("KRB5CCNAME")
+                .withValue("/etc/krb5tickets/ticket")
+                .build());
+        envVars.add(new V1EnvVarBuilder()
+                .withName("KRB5_CONFIG")
+                .withValue("/etc/krb5conf/krb5.conf")
+                .build());
 
         V1Pod pod = new V1PodBuilder()
                 .withApiVersion("v1")
                 .withKind("Pod")
-                .withMetadata(new V1ObjectMetaBuilder()
-                        .withName(uuid)
-                        .build())
+                .withMetadata(metaBuilder.build())
                 .withSpec(new V1PodSpecBuilder()
                         .withRestartPolicy("Never")
                         .withNodeName(nodeName)
@@ -232,15 +273,7 @@ public class M8s {
                                     .build())
                         .withContainers(new V1ContainerBuilder()
                                 .withName("container-name")
-                                .withEnv(
-                                        new V1EnvVarBuilder()
-                                            .withName("KRB5CCNAME")
-                                            .withValue("/etc/krb5tickets/ticket")
-                                            .build(),
-                                        new V1EnvVarBuilder()
-                                            .withName("KRB5_CONFIG")
-                                            .withValue("/etc/krb5conf/krb5.conf")
-                                            .build())
+                                .withEnv(envVars)
                                 .withVolumeMounts(
                                         new V1VolumeMountBuilder()
                                             .withName("kerberosticket")
@@ -254,6 +287,7 @@ public class M8s {
                                             .build())
                                 .withResources(new V1ResourceRequirementsBuilder()
                                         .withRequests(requests)
+                                        .withLimits(limits)
                                         .build())
                                 .withImage(image)
                                 .withCommand("/bin/sh")
@@ -261,6 +295,7 @@ public class M8s {
                                 .build())
                         .build())
                 .build();
+
         this.coreV1Api.createNamespacedPod(namespace, pod, null);
     }
 

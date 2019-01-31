@@ -66,7 +66,7 @@ public class Application {
         // Create dummy container
         String uuid = UUID.randomUUID().toString();
         System.out.println("Starting pod with uuid " + uuid);
-        m8.startPod("rodrigo", 0.5, 256, "us.gcr.io/rodrigo-dev/debian-kerb", "curl --negotiate -u: http://h-10-142-0-12.testbed.com:5000/data > /tmp/kerb-test && sleep 666", null, uuid);
+        m8.startPod("rodrigo", 0.5, 0, 256, "us.gcr.io/rodrigo-dev/debian-kerb", "curl --negotiate -u: http://h-10-142-0-12.testbed.com:5000/data > /tmp/kerb-test && sleep 60", null, null, uuid);
 
         //m8.populateOrRefreshKerberosTicket("rodrigo");
 
