@@ -368,9 +368,9 @@ public class AutoScaler {
         Container gkeClient = buildGkeClient(clientSecretPath);
         Compute gceClient = buildGceClient(clientSecretPath);
         AutoScaler scaler = new AutoScaler(
-                "rodrigo-dev",
-                "us-central1-a",
-                "m8s-dev-1",
+                System.getenv("PROJECT_ID"),
+                System.getenv("CLUSTER_LOCATION"),
+                System.getenv("CLUSTER_NAME"),
                 k8sClient,
                 gkeClient,
                 gceClient,
