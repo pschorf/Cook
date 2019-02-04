@@ -6,6 +6,7 @@ import io.kubernetes.client.custom.Quantity;
 import org.joda.time.DateTime;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -66,7 +67,11 @@ public class Application {
         // Create dummy container
         String uuid = UUID.randomUUID().toString();
         System.out.println("Starting pod with uuid " + uuid);
-        m8.startPod("rodrigo", 0.5, 0, 256, "us.gcr.io/rodrigo-dev/debian-kerb", "curl --negotiate -u: http://h-10-142-0-12.testbed.com:5000/data > /tmp/kerb-test && sleep 60", null, null, uuid);
+        // curl --negotiate -u: http://h-10-142-0-12.testbed.com:5000/data > /tmp/kerb-test &&
+        Map<String, String> envVars = new HashMap<>();
+        envVars.put("PYTHONPATH", "/tensorflow_tpu_models/models");
+        String tpuCmd = "python tensorflow_tpu_models/models/official/resnet/resnet_main.py --data_dir=gs://cloud-tpu-test-datasets/fake_imagenet --model_dir=gs://resnet-test2/resnet";
+        m8.startPod("rodrigo", 0.5, 8, 4096, "gcr.io/tensorflow/tpu-models:r1.12", tpuCmd, envVars, null, uuid);
 
         //m8.populateOrRefreshKerberosTicket("rodrigo");
 

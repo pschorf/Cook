@@ -220,9 +220,9 @@ public class M8s {
 
         if (tpus > 0) {
             Map<String, String> tpuAnnotations = new HashMap<>();
-            tpuAnnotations.put("tf-version.cloud-tpus.google.com", "1.11");
+            tpuAnnotations.put("tf-version.cloud-tpus.google.com", "1.12");
             metaBuilder.withAnnotations(tpuAnnotations);
-            limits.put("cloud-tpus.google.com/preemptible-v2", Quantity.fromString(Integer.toString(tpus)));
+            limits.put("cloud-tpus.google.com/v2", Quantity.fromString(Integer.toString(tpus)));
         }
 
         List<V1EnvVar> envVars = new ArrayList<>();
