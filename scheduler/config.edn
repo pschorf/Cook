@@ -15,9 +15,9 @@
  :container-defaults {:volumes [{:host-path "/tmp/cook-integration-mount"
                                  :container-path "/mnt/cook-integration"
                                  :mode "RW"}]}
- :compute-clusters [{:factory-fn cook.mesos.mesos-compute-cluster/factory-fn
-                     :config {:framework-id #config/env "COOK_FRAMEWORK_ID"
-                              :compute-cluster-name "local-mesos"}}]
+ :compute-clusters [{:factory-fn cook.kubernetes.compute-cluster/factory-fn
+                     :config {:compute-cluster-name "minikube"
+                              :config-file "/Users/paul/.kube/config"}}]
  :cors-origins ["https?://cors.example.com"]
  :data-local {:fitness-calculator {:cache-ttl-ms 60000
                                    :cost-endpoint #config/env "DATA_LOCAL_ENDPOINT"
