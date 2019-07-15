@@ -1,0 +1,4 @@
+# Running with kubernetes
+- Set up minikube
+- Export COOK_K8S_CONFIG_FILE to the path pointing to the minikube config file
+- Use config-k8s.edn instead of config.edn
