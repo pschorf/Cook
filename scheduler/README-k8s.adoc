@@ -2,3 +2,8 @@
 - Set up minikube
 - Export COOK_K8S_CONFIG_FILE to the path pointing to the minikube config file
 - Use config-k8s.edn instead of config.edn
+
+# Run local tidbits
+- Start datomic: scheduler/bin/start-datomic.sh
+- Seed pools: lein exec -p scheduler/datomic/data/seed_pools.clj datomic:free://localhost:4334/jobs
+- Run local: COOK_DATOMIC_URI=datomic:free://localhost:4334/jobs scheduler/bin/run-local.sh
